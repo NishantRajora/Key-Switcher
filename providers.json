@@ -1,19 +1,36 @@
 {
-    "providers": {
-        "Ollama": {
-            "base_url": "https://ollama.com",
-            "models": [
-                "gemma4:31b",
-                "gpt-oss:120b",
-                "gpt-oss:20b",
-                "nemotron-3-nano:30b",
-                "nemotron-3-super",
-                "nemotron-3-ultra"
-            ]
-        },
-        "Hugging Face": {
-            "base_url": "https://router.huggingface.co/v1",
-            "models": []
-        }
+  "providers": {
+    "Ollama": {
+      "base_url": "https://ollama.com",
+      "models": [
+        "gemma4:31b",
+        "gpt-oss:120b",
+        "gpt-oss:20b",
+        "nemotron-3-nano:30b",
+        "nemotron-3-super",
+        "nemotron-3-ultra"
+      ]
+    },
+    "Hugging Face": {
+      "base_url": "https://router.huggingface.co",
+      "models": [
+        "openai/gpt-oss-120b",
+        "zai-org/GLM-5.1",
+        "Qwen/Qwen3.8-27B:ovhcloud",
+        "google/gemma-4-31B-it:novita"
+      ]
+    },
+    "NVIDIA": {
+      "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
+      "models": [
+        "gpt-oss-20b"
+      ]
+    },
+    "AIstudio": {
+      "base_url": "https://generativelanguage.googleapis.com",
+      "models": [
+        "gpt-oss-20b"
+      ]
     }
+  }
 }

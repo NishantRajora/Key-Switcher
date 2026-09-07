@@ -1,6 +1,3 @@
-### it have multiple provder support
-
-
 import sys
 import json
 from pathlib import Path
@@ -25,9 +22,27 @@ from PySide6.QtWidgets import (
     QLineEdit,
 )
 
-SETTINGS_FILE = Path(r"C:\Users\Nishant\.claude\settings.json")
-KEY_FILE = Path(r"C:\My Space\Data\keys.xlsx")
-PROVIDERS_FILE = Path(__file__).with_name("providers.json")
+
+# ============================================================
+# FILE PATHS
+# ============================================================
+
+SETTINGS_FILE = Path(
+    r"C:\Users\Nishant\.claude\settings.json"
+)
+
+KEY_FILE = Path(
+    r"C:\My Space\Data\keys.xlsx"
+)
+
+PROVIDERS_FILE = Path(__file__).with_name(
+    "providers.json"
+)
+
+
+# ============================================================
+# CLAUDE CODE SETTINGS
+# ============================================================
 
 MODEL_SETTINGS = [
     "ANTHROPIC_MODEL",
@@ -37,74 +52,114 @@ MODEL_SETTINGS = [
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 ]
 
+
+# ============================================================
+# DEFAULT PROVIDERS
+#
+# This matches your providers.json structure.
+# ============================================================
+
 DEFAULT_PROVIDERS = {
     "providers": {
         "Ollama": {
-            "base_url": "http://localhost:11434",
+            "base_url": "https://ollama.com",
             "models": [
                 "gemma4:31b",
                 "gpt-oss:120b",
                 "gpt-oss:20b",
                 "nemotron-3-nano:30b",
                 "nemotron-3-super",
-                "nemotron-3-ultra",
-            ],
+                "nemotron-3-ultra"
+            ]
         },
+
         "Hugging Face": {
             "base_url": "https://router.huggingface.co/v1",
-            "models": [],
-        },
+            "models": [
+                "Qwen/Qwen3.8-27B"
+            ]
+        }
     }
 }
 
 
+# ============================================================
+# PROVIDER JSON FUNCTIONS
+# ============================================================
+
 def ensure_provider_file():
+
     if not PROVIDERS_FILE.exists():
+
         PROVIDERS_FILE.write_text(
-            json.dumps(DEFAULT_PROVIDERS, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+            json.dumps(
+                DEFAULT_PROVIDERS,
+                indent=2,
+                ensure_ascii=False
+            ),
+            encoding="utf-8"
         )
 
 
 def load_providers():
+
     ensure_provider_file()
 
     try:
+
         data = json.loads(
-            PROVIDERS_FILE.read_text(encoding="utf-8")
+            PROVIDERS_FILE.read_text(
+                encoding="utf-8"
+            )
         )
 
-        if not isinstance(data.get("providers"), dict):
-            raise ValueError("Invalid providers.json format.")
+        if not isinstance(
+            data.get("providers"),
+            dict
+        ):
+
+            raise ValueError(
+                "Invalid providers.json format."
+            )
 
         return data
 
     except Exception as exc:
+
         raise RuntimeError(
             f"Could not read providers.json:\n{exc}"
         )
 
 
 def save_providers(data):
+
     PROVIDERS_FILE.write_text(
         json.dumps(
             data,
             indent=2,
             ensure_ascii=False
         ),
-        encoding="utf-8",
+        encoding="utf-8"
     )
 
 
+# ============================================================
+# EXCEL FUNCTIONS
+# ============================================================
+
 def ensure_key_file():
+
     if not KEY_FILE.exists():
+
         KEY_FILE.parent.mkdir(
             parents=True,
             exist_ok=True
         )
 
         wb = Workbook()
+
         ws = wb.active
+
         ws.title = "Keys"
 
         ws.append([
@@ -113,34 +168,69 @@ def ensure_key_file():
             "API Key"
         ])
 
-        wb.save(KEY_FILE)
+        wb.save(
+            KEY_FILE
+        )
+
         wb.close()
 
 
+# ============================================================
+# PROVIDER SETTINGS DIALOG
+# ============================================================
+
 class ProviderSettingsDialog(QDialog):
 
-    def __init__(self, parent, providers):
+    def __init__(
+        self,
+        parent,
+        providers
+    ):
+
         super().__init__(parent)
 
         self.parent_window = parent
         self.providers = providers
 
-        self.setWindowTitle("Provider Settings")
-        self.resize(650, 450)
+        self.setWindowTitle(
+            "Provider Settings"
+        )
 
-        layout = QVBoxLayout(self)
+        self.resize(
+            650,
+            450
+        )
+
+        layout = QVBoxLayout(
+            self
+        )
 
         form = QFormLayout()
+
+        # ----------------------------------------------------
+        # PROVIDER
+        # ----------------------------------------------------
 
         self.provider_dropdown = QComboBox()
 
         self.provider_dropdown.addItems(
-            self.providers["providers"].keys()
+            self.providers[
+                "providers"
+            ].keys()
         )
 
         self.provider_dropdown.currentTextChanged.connect(
             self.load_provider
         )
+
+        form.addRow(
+            "Provider:",
+            self.provider_dropdown
+        )
+
+        # ----------------------------------------------------
+        # BASE URL
+        # ----------------------------------------------------
 
         self.url_edit = QLineEdit()
 
@@ -149,16 +239,17 @@ class ProviderSettingsDialog(QDialog):
         )
 
         form.addRow(
-            "Provider:",
-            self.provider_dropdown
-        )
-
-        form.addRow(
             "Base URL:",
             self.url_edit
         )
 
-        layout.addLayout(form)
+        layout.addLayout(
+            form
+        )
+
+        # ----------------------------------------------------
+        # MODELS
+        # ----------------------------------------------------
 
         layout.addWidget(
             QLabel("Models:")
@@ -169,6 +260,10 @@ class ProviderSettingsDialog(QDialog):
         layout.addWidget(
             self.model_list
         )
+
+        # ----------------------------------------------------
+        # BUTTONS
+        # ----------------------------------------------------
 
         buttons = QHBoxLayout()
 
@@ -204,34 +299,79 @@ class ProviderSettingsDialog(QDialog):
             self.reject
         )
 
-        buttons.addWidget(add_btn)
-        buttons.addWidget(delete_btn)
-        buttons.addStretch()
-        buttons.addWidget(save_btn)
-        buttons.addWidget(close_btn)
+        buttons.addWidget(
+            add_btn
+        )
 
-        layout.addLayout(buttons)
+        buttons.addWidget(
+            delete_btn
+        )
+
+        buttons.addStretch()
+
+        buttons.addWidget(
+            save_btn
+        )
+
+        buttons.addWidget(
+            close_btn
+        )
+
+        layout.addLayout(
+            buttons
+        )
+
+        # ----------------------------------------------------
+        # LOAD FIRST PROVIDER
+        # ----------------------------------------------------
 
         if self.provider_dropdown.count():
+
             self.load_provider(
                 self.provider_dropdown.currentText()
             )
 
-    def load_provider(self, provider):
 
-        data = self.providers[
-            "providers"
-        ].get(provider, {})
+    # ========================================================
+    # LOAD PROVIDER
+    # ========================================================
 
-        self.url_edit.setText(
-            data.get("base_url", "")
+    def load_provider(
+        self,
+        provider
+    ):
+
+        data = (
+            self.providers[
+                "providers"
+            ].get(
+                provider,
+                {}
+            )
         )
 
+        # Load provider's base URL
+        self.url_edit.setText(
+            data.get(
+                "base_url",
+                ""
+            )
+        )
+
+        # Load provider's models
         self.model_list.clear()
 
         self.model_list.addItems(
-            data.get("models", [])
+            data.get(
+                "models",
+                []
+            )
         )
+
+
+    # ========================================================
+    # ADD MODEL
+    # ========================================================
 
     def add_model(self):
 
@@ -241,9 +381,12 @@ class ProviderSettingsDialog(QDialog):
             "Model name:"
         )
 
+        if not ok:
+            return
+
         model = model.strip()
 
-        if not ok or not model:
+        if not model:
             return
 
         existing = [
@@ -263,7 +406,14 @@ class ProviderSettingsDialog(QDialog):
 
             return
 
-        self.model_list.addItem(model)
+        self.model_list.addItem(
+            model
+        )
+
+
+    # ========================================================
+    # DELETE MODEL
+    # ========================================================
 
     def delete_model(self):
 
@@ -283,6 +433,11 @@ class ProviderSettingsDialog(QDialog):
             self.model_list.row(item)
         )
 
+
+    # ========================================================
+    # SAVE PROVIDER
+    # ========================================================
+
     def save(self):
 
         provider = (
@@ -290,23 +445,40 @@ class ProviderSettingsDialog(QDialog):
             .currentText()
         )
 
+        base_url = (
+            self.url_edit
+            .text()
+            .strip()
+        )
+
         models = [
-            self.model_list.item(i).text().strip()
+            self.model_list.item(i)
+            .text()
+            .strip()
+
             for i in range(
                 self.model_list.count()
             )
-            if self.model_list.item(i).text().strip()
+
+            if self.model_list.item(i)
+            .text()
+            .strip()
         ]
+
+        # Keep EXACTLY the structure:
+        #
+        # "Provider": {
+        #     "base_url": "...",
+        #     "models": [...]
+        # }
 
         self.providers[
             "providers"
         ][provider] = {
 
-            "base_url":
-                self.url_edit.text().strip(),
+            "base_url": base_url,
 
-            "models":
-                models
+            "models": models
         }
 
         try:
@@ -334,9 +506,16 @@ class ProviderSettingsDialog(QDialog):
             )
 
 
+# ============================================================
+# KEY MANAGER
+# ============================================================
+
 class KeyManagerDialog(QDialog):
 
-    def __init__(self, parent):
+    def __init__(
+        self,
+        parent
+    ):
 
         super().__init__(parent)
 
@@ -351,7 +530,9 @@ class KeyManagerDialog(QDialog):
             200
         )
 
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout(
+            self
+        )
 
         add_btn = QPushButton(
             "Add Key"
@@ -385,16 +566,34 @@ class KeyManagerDialog(QDialog):
             self.accept
         )
 
-        layout.addWidget(add_btn)
-        layout.addWidget(delete_btn)
-        layout.addWidget(provider_btn)
-        layout.addWidget(close_btn)
+        layout.addWidget(
+            add_btn
+        )
+
+        layout.addWidget(
+            delete_btn
+        )
+
+        layout.addWidget(
+            provider_btn
+        )
+
+        layout.addWidget(
+            close_btn
+        )
+
+
+    # ========================================================
+    # ADD KEY
+    # ========================================================
 
     def add_key(self):
 
         providers = list(
             self.parent_window
-            .providers["providers"]
+            .providers[
+                "providers"
+            ]
             .keys()
         )
 
@@ -403,10 +602,14 @@ class KeyManagerDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "No Providers",
-                "Add a provider first."
+                "No providers are configured."
             )
 
             return
+
+        # ----------------------------------------------------
+        # SELECT PROVIDER
+        # ----------------------------------------------------
 
         provider, ok = QInputDialog.getItem(
             self,
@@ -419,6 +622,10 @@ class KeyManagerDialog(QDialog):
 
         if not ok:
             return
+
+        # ----------------------------------------------------
+        # NICKNAME
+        # ----------------------------------------------------
 
         nickname, ok = QInputDialog.getText(
             self,
@@ -451,6 +658,10 @@ class KeyManagerDialog(QDialog):
 
             return
 
+        # ----------------------------------------------------
+        # API KEY
+        # ----------------------------------------------------
+
         api_key, ok = QInputDialog.getText(
             self,
             "Add Key",
@@ -473,6 +684,10 @@ class KeyManagerDialog(QDialog):
 
             return
 
+        # ----------------------------------------------------
+        # SAVE TO EXCEL
+        # ----------------------------------------------------
+
         try:
 
             ensure_key_file()
@@ -483,16 +698,9 @@ class KeyManagerDialog(QDialog):
 
             ws = wb.active
 
-            if ws.max_row == 1 and all(
-                ws.cell(1, c).value is None
-                for c in range(1, 4)
-            ):
-
-                ws.append([
-                    "Provider",
-                    "Nickname",
-                    "API Key"
-                ])
+            # Expected:
+            #
+            # Provider | Nickname | API Key
 
             ws.append([
                 provider,
@@ -519,7 +727,7 @@ class KeyManagerDialog(QDialog):
             QMessageBox.critical(
                 self,
                 "Excel File Locked",
-                "Close key.xlsx in Excel and try again."
+                "Close keys.xlsx in Excel and try again."
             )
 
         except Exception as exc:
@@ -529,6 +737,11 @@ class KeyManagerDialog(QDialog):
                 "Error",
                 f"Could not add key:\n{exc}"
             )
+
+
+    # ========================================================
+    # DELETE KEY
+    # ========================================================
 
     def delete_key(self):
 
@@ -558,12 +771,14 @@ class KeyManagerDialog(QDialog):
             QMessageBox.StandardButton.No
         )
 
-        if answer != QMessageBox.StandardButton.Yes:
+        if (
+            answer
+            != QMessageBox.StandardButton.Yes
+        ):
+
             return
 
         try:
-
-            ensure_key_file()
 
             wb = load_workbook(
                 KEY_FILE
@@ -573,38 +788,43 @@ class KeyManagerDialog(QDialog):
 
             target_row = None
 
+            # ------------------------------------------------
+            # Find Nickname column
+            # ------------------------------------------------
+
             headers = [
                 str(
-                    ws.cell(1, c).value or ""
-                ).strip().lower()
+                    ws.cell(
+                        1,
+                        c
+                    ).value or ""
+                )
+                .strip()
+                .lower()
+
                 for c in range(
                     1,
-                    min(ws.max_column, 3) + 1
+                    ws.max_column + 1
                 )
             ]
 
-            if headers[:3] == [
-                "provider",
-                "nickname",
-                "api key"
-            ]:
-
-                nickname_col = 2
-
-            elif headers[:2] == [
-                "nickname",
-                "key"
-            ]:
-
-                nickname_col = 1
-
-            else:
+            try:
 
                 nickname_col = (
-                    2
-                    if ws.max_column >= 3
-                    else 1
+                    headers.index(
+                        "nickname"
+                    )
+                    + 1
                 )
+
+            except ValueError:
+
+                # Backward compatibility
+                nickname_col = 2
+
+            # ------------------------------------------------
+            # Find matching nickname
+            # ------------------------------------------------
 
             for row in range(
                 2,
@@ -617,11 +837,15 @@ class KeyManagerDialog(QDialog):
                 ).value
 
                 if (
-                    str(value or "").strip()
+                    str(
+                        value or ""
+                    )
+                    .strip()
                     == nickname
                 ):
 
                     target_row = row
+
                     break
 
             if target_row is None:
@@ -631,10 +855,14 @@ class KeyManagerDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "Not Found",
-                    f"Could not find '{nickname}' in key.xlsx."
+                    f"Could not find '{nickname}' in keys.xlsx."
                 )
 
                 return
+
+            # ------------------------------------------------
+            # Delete row
+            # ------------------------------------------------
 
             ws.delete_rows(
                 target_row,
@@ -660,7 +888,7 @@ class KeyManagerDialog(QDialog):
             QMessageBox.critical(
                 self,
                 "Excel File Locked",
-                "Close key.xlsx in Excel and try again."
+                "Close keys.xlsx in Excel and try again."
             )
 
         except Exception as exc:
@@ -670,6 +898,11 @@ class KeyManagerDialog(QDialog):
                 "Error",
                 f"Could not delete key:\n{exc}"
             )
+
+
+    # ========================================================
+    # PROVIDER SETTINGS
+    # ========================================================
 
     def provider_settings(self):
 
@@ -681,6 +914,10 @@ class KeyManagerDialog(QDialog):
         dialog.exec()
 
 
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+
 class KeySwitcher(QMainWindow):
 
     def __init__(self):
@@ -688,6 +925,7 @@ class KeySwitcher(QMainWindow):
         super().__init__()
 
         self.keys = {}
+
         self.key_providers = {}
 
         self.providers = {
@@ -707,6 +945,11 @@ class KeySwitcher(QMainWindow):
 
         self.load_data()
 
+
+    # ========================================================
+    # UI
+    # ========================================================
+
     def setup_ui(self):
 
         central = QWidget()
@@ -718,6 +961,10 @@ class KeySwitcher(QMainWindow):
         main_layout = QVBoxLayout(
             central
         )
+
+        # ----------------------------------------------------
+        # TITLE
+        # ----------------------------------------------------
 
         title = QLabel(
             "Key Switcher"
@@ -735,20 +982,26 @@ class KeySwitcher(QMainWindow):
             title
         )
 
+        # ----------------------------------------------------
+        # FORM
+        # ----------------------------------------------------
+
         form = QFormLayout()
 
+        # Nickname
         self.key_dropdown = QComboBox()
 
         self.key_dropdown.currentTextChanged.connect(
             self.on_nickname_changed
         )
 
-        self.model_dropdown = QComboBox()
-
         form.addRow(
             "Nickname:",
             self.key_dropdown
         )
+
+        # Model
+        self.model_dropdown = QComboBox()
 
         form.addRow(
             "Model:",
@@ -758,6 +1011,10 @@ class KeySwitcher(QMainWindow):
         main_layout.addLayout(
             form
         )
+
+        # ----------------------------------------------------
+        # BUTTONS
+        # ----------------------------------------------------
 
         buttons = QHBoxLayout()
 
@@ -803,6 +1060,10 @@ class KeySwitcher(QMainWindow):
             buttons
         )
 
+        # ----------------------------------------------------
+        # STATUS
+        # ----------------------------------------------------
+
         self.status = QLabel(
             "Ready"
         )
@@ -814,6 +1075,11 @@ class KeySwitcher(QMainWindow):
         main_layout.addWidget(
             self.status
         )
+
+
+    # ========================================================
+    # LOAD EVERYTHING
+    # ========================================================
 
     def load_data(self):
 
@@ -831,13 +1097,20 @@ class KeySwitcher(QMainWindow):
                 str(exc)
             )
 
+
+    # ========================================================
+    # LOAD EXCEL KEYS
+    # ========================================================
+
     def load_keys(self):
 
         current = (
-            self.key_dropdown.currentText()
+            self.key_dropdown
+            .currentText()
         )
 
         self.keys.clear()
+
         self.key_providers.clear()
 
         self.key_dropdown.blockSignals(
@@ -864,83 +1137,150 @@ class KeySwitcher(QMainWindow):
 
             ws = wb.active
 
+            # ------------------------------------------------
+            # Read headers
+            # ------------------------------------------------
+
             headers = [
                 str(
-                    ws.cell(1, c).value or ""
-                ).strip().lower()
+                    ws.cell(
+                        1,
+                        c
+                    ).value or ""
+                )
+                .strip()
+                .lower()
+
                 for c in range(
                     1,
-                    min(ws.max_column, 3) + 1
+                    ws.max_column + 1
                 )
             ]
 
-            if headers[:3] == [
-                "provider",
-                "nickname",
-                "api key"
-            ]:
+            # ------------------------------------------------
+            # Find columns
+            # ------------------------------------------------
 
-                provider_col = 1
-                nickname_col = 2
-                key_col = 3
+            try:
 
-            elif headers[:2] == [
-                "nickname",
-                "key"
-            ]:
+                provider_col = (
+                    headers.index(
+                        "provider"
+                    )
+                    + 1
+                )
+
+            except ValueError:
 
                 provider_col = None
-                nickname_col = 1
-                key_col = 2
 
-            else:
+            try:
 
-                provider_col = 1
+                nickname_col = (
+                    headers.index(
+                        "nickname"
+                    )
+                    + 1
+                )
+
+            except ValueError:
+
                 nickname_col = 2
-                key_col = 3
+
+            try:
+
+                key_col = (
+                    headers.index(
+                        "api key"
+                    )
+                    + 1
+                )
+
+            except ValueError:
+
+                # Old format:
+                # Nickname | Key
+
+                try:
+
+                    key_col = (
+                        headers.index(
+                            "key"
+                        )
+                        + 1
+                    )
+
+                except ValueError:
+
+                    key_col = 3
+
+            # ------------------------------------------------
+            # Read rows
+            # ------------------------------------------------
 
             for row in ws.iter_rows(
                 min_row=2,
                 values_only=True
             ):
 
+                # Provider
                 provider = ""
 
+                if provider_col:
+
+                    if (
+                        len(row)
+                        >= provider_col
+                        and row[
+                            provider_col - 1
+                        ]
+                    ):
+
+                        provider = str(
+                            row[
+                                provider_col - 1
+                            ]
+                        ).strip()
+
+                # Nickname
                 if (
-                    provider_col
-                    and len(row) >= provider_col
-                    and row[provider_col - 1]
-                ):
-
-                    provider = str(
-                        row[provider_col - 1]
-                    ).strip()
-
-                if (
-                    len(row) < nickname_col
-                    or not row[nickname_col - 1]
-                ):
-
-                    continue
-
-                if (
-                    len(row) < key_col
-                    or not row[key_col - 1]
+                    len(row)
+                    < nickname_col
+                    or not row[
+                        nickname_col - 1
+                    ]
                 ):
 
                     continue
 
                 nickname = str(
-                    row[nickname_col - 1]
+                    row[
+                        nickname_col - 1
+                    ]
                 ).strip()
 
+                # API Key
+                if (
+                    len(row)
+                    < key_col
+                    or not row[
+                        key_col - 1
+                    ]
+                ):
+
+                    continue
+
                 api_key = str(
-                    row[key_col - 1]
+                    row[
+                        key_col - 1
+                    ]
                 ).strip()
 
                 if nickname and api_key:
 
-                    self.keys[nickname] = api_key
+                    self.keys[
+                        nickname
+                    ] = api_key
 
                     self.key_providers[
                         nickname
@@ -957,10 +1297,14 @@ class KeySwitcher(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Excel Error",
-                f"Could not read key.xlsx:\n{exc}"
+                f"Could not read keys.xlsx:\n{exc}"
             )
 
             return
+
+        # ----------------------------------------------------
+        # Populate Nickname dropdown
+        # ----------------------------------------------------
 
         self.key_dropdown.addItems(
             self.keys.keys()
@@ -989,6 +1333,14 @@ class KeySwitcher(QMainWindow):
             self.key_dropdown.currentText()
         )
 
+
+    # ========================================================
+    # NICKNAME CHANGED
+    #
+    # This determines the provider from Excel.
+    # Then it loads that provider's models from JSON.
+    # ========================================================
+
     def on_nickname_changed(
         self,
         nickname
@@ -996,30 +1348,50 @@ class KeySwitcher(QMainWindow):
 
         self.model_dropdown.clear()
 
-        provider = self.key_providers.get(
-            nickname,
-            ""
-        ).strip()
+        provider = (
+            self.key_providers
+            .get(
+                nickname,
+                ""
+            )
+            .strip()
+        )
+
+        # ----------------------------------------------------
+        # Provider not found
+        # ----------------------------------------------------
 
         if not provider:
 
-            if len(
-                self.providers["providers"]
-            ) == 1:
+            self.status.setText(
+                "Provider not found for selected nickname"
+            )
 
-                provider = next(
-                    iter(
-                        self.providers["providers"]
-                    )
-                )
+            return
+
+        # ----------------------------------------------------
+        # Find provider in providers.json
+        # ----------------------------------------------------
 
         provider_data = (
-            self.providers["providers"]
-            .get(
-                provider,
-                {}
+            self.providers[
+                "providers"
+            ].get(
+                provider
             )
         )
+
+        if provider_data is None:
+
+            self.status.setText(
+                f"Provider '{provider}' not found in providers.json"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Get models
+        # ----------------------------------------------------
 
         models = provider_data.get(
             "models",
@@ -1030,17 +1402,23 @@ class KeySwitcher(QMainWindow):
             models
         )
 
-        if provider:
+        # ----------------------------------------------------
+        # Show status
+        # ----------------------------------------------------
 
-            self.status.setText(
-                f"{provider} • {len(models)} model(s)"
-            )
+        base_url = provider_data.get(
+            "base_url",
+            ""
+        )
 
-        else:
+        self.status.setText(
+            f"{provider} • {len(models)} model(s)"
+        )
 
-            self.status.setText(
-                "Select a nickname"
-            )
+
+    # ========================================================
+    # OPEN MENU
+    # ========================================================
 
     def open_menu(self):
 
@@ -1050,7 +1428,16 @@ class KeySwitcher(QMainWindow):
 
         dialog.exec()
 
+
+    # ========================================================
+    # APPLY SETTINGS
+    # ========================================================
+
     def apply_settings(self):
+
+        # ----------------------------------------------------
+        # Selected nickname
+        # ----------------------------------------------------
 
         nickname = (
             self.key_dropdown
@@ -1058,11 +1445,19 @@ class KeySwitcher(QMainWindow):
             .strip()
         )
 
+        # ----------------------------------------------------
+        # Selected model
+        # ----------------------------------------------------
+
         model = (
             self.model_dropdown
             .currentText()
             .strip()
         )
+
+        # ----------------------------------------------------
+        # Validate nickname
+        # ----------------------------------------------------
 
         if not nickname:
 
@@ -1074,6 +1469,10 @@ class KeySwitcher(QMainWindow):
 
             return
 
+        # ----------------------------------------------------
+        # Validate model
+        # ----------------------------------------------------
+
         if not model:
 
             QMessageBox.warning(
@@ -1083,6 +1482,10 @@ class KeySwitcher(QMainWindow):
             )
 
             return
+
+        # ----------------------------------------------------
+        # Get API key
+        # ----------------------------------------------------
 
         api_key = self.keys.get(
             nickname
@@ -1098,6 +1501,80 @@ class KeySwitcher(QMainWindow):
 
             return
 
+        # ----------------------------------------------------
+        # Get provider from Excel
+        # ----------------------------------------------------
+
+        provider = (
+            self.key_providers
+            .get(
+                nickname,
+                ""
+            )
+            .strip()
+        )
+
+        if not provider:
+
+            QMessageBox.warning(
+                self,
+                "Missing Provider",
+                "No provider is associated with this nickname."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Get provider configuration from JSON
+        # ----------------------------------------------------
+
+        provider_data = (
+            self.providers[
+                "providers"
+            ].get(
+                provider
+            )
+        )
+
+        if provider_data is None:
+
+            QMessageBox.critical(
+                self,
+                "Provider Not Found",
+                f"Provider '{provider}' was not found "
+                "in providers.json."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Get BASE URL from JSON
+        # ----------------------------------------------------
+
+        base_url = (
+            provider_data
+            .get(
+                "base_url",
+                ""
+            )
+            .strip()
+        )
+
+        if not base_url:
+
+            QMessageBox.critical(
+                self,
+                "Missing Base URL",
+                f"No base_url is configured for "
+                f"provider '{provider}'."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Check Claude Code settings
+        # ----------------------------------------------------
+
         if not SETTINGS_FILE.exists():
 
             QMessageBox.critical(
@@ -1108,6 +1585,10 @@ class KeySwitcher(QMainWindow):
             )
 
             return
+
+        # ----------------------------------------------------
+        # UPDATE SETTINGS.JSON
+        # ----------------------------------------------------
 
         try:
 
@@ -1129,6 +1610,10 @@ class KeySwitcher(QMainWindow):
                     "settings.json must contain a JSON object."
                 )
 
+            # ------------------------------------------------
+            # Get env
+            # ------------------------------------------------
+
             env = settings.setdefault(
                 "env",
                 {}
@@ -1143,13 +1628,37 @@ class KeySwitcher(QMainWindow):
                     "'env' in settings.json must be an object."
                 )
 
+            # ------------------------------------------------
+            # API KEY
+            # ------------------------------------------------
+
             env[
                 "ANTHROPIC_AUTH_TOKEN"
             ] = api_key
 
+            # ------------------------------------------------
+            # BASE URL
+            #
+            # THIS IS THE IMPORTANT FIX
+            # ------------------------------------------------
+
+            env[
+                "ANTHROPIC_BASE_URL"
+            ] = base_url
+
+            # ------------------------------------------------
+            # MODELS
+            # ------------------------------------------------
+
             for setting in MODEL_SETTINGS:
 
-                env[setting] = model
+                env[
+                    setting
+                ] = model
+
+            # ------------------------------------------------
+            # SAVE SETTINGS
+            # ------------------------------------------------
 
             with SETTINGS_FILE.open(
                 "w",
@@ -1163,18 +1672,16 @@ class KeySwitcher(QMainWindow):
                     ensure_ascii=False
                 )
 
-                file.write("\n")
-
-            provider = (
-                self.key_providers
-                .get(
-                    nickname,
-                    "Unknown provider"
+                file.write(
+                    "\n"
                 )
-            )
+
+            # ------------------------------------------------
+            # SUCCESS
+            # ------------------------------------------------
 
             self.status.setText(
-                f"Applied: {nickname} • {model}"
+                f"Applied: {provider} • {nickname} • {model}"
             )
 
             QMessageBox.information(
@@ -1183,8 +1690,13 @@ class KeySwitcher(QMainWindow):
                 "Claude Code settings updated.\n\n"
                 f"Provider: {provider}\n"
                 f"Nickname: {nickname}\n"
-                f"Model: {model}"
+                f"Model: {model}\n"
+                f"Base URL: {base_url}"
             )
+
+        # ----------------------------------------------------
+        # ERRORS
+        # ----------------------------------------------------
 
         except json.JSONDecodeError:
 
@@ -1211,6 +1723,10 @@ class KeySwitcher(QMainWindow):
             )
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
 
     app = QApplication(
@@ -1227,4 +1743,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
