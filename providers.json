@@ -29,7 +29,7 @@
     "AIstudio": {
       "base_url": "https://generativelanguage.googleapis.com",
       "models": [
-        "gpt-oss-20b"
+        "no model"
       ]
     }
   }
