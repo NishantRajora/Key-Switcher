@@ -11,6 +11,16 @@
         "nemotron-3-ultra"
       ]
     },
+    "Openrouter": {
+      "base_url": "https://openrouter.ai/api",
+      "models": [
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "cohere/north-mini-code:free",
+        "nex-agi/nex-n2.5-mini:free",
+        "inclusionai/ling-3.0-flash-fin:free"
+      ]
+    },
     "Hugging Face": {
       "base_url": "https://router.huggingface.co",
       "models": [
@@ -26,12 +36,6 @@
         "moonshotai/kimi-k3",
         "deepseek-ai/deepseek-v4-pro-0813",
         "openai/gpt-oss-20b"
-      ]
-    },
-    "AIstudio": {
-      "base_url": "https://generativelanguage.googleapis.com",
-      "models": [
-        "no model"
       ]
     }
   }
