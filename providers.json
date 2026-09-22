@@ -18,7 +18,8 @@
         "cohere/north-mini-code:free",
         "nex-agi/nex-n2.5-mini:free",
         "inclusionai/ling-3.0-flash-fin:free",
-        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "google/gemma-4-31b-it:free"
       ]
     },
     "Hugging Face": {
