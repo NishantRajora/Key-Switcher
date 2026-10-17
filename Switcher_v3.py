@@ -40,8 +40,8 @@ PROVIDERS_FILE = Path(__file__).with_name(
     "providers.json"
 )
 
-SWITCH_HISTORY_FILE = Path(__file__).with_name(
-    "model_switch_history.xlsx"
+SWITCH_HISTORY_FILE = Path(
+    r"C:\My Space\Data\model_switch_history.xlsx"
 )
 
 
