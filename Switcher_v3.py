@@ -1,5 +1,6 @@
 import sys
 import json
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook, Workbook
@@ -37,6 +38,10 @@ KEY_FILE = Path(
 
 PROVIDERS_FILE = Path(__file__).with_name(
     "providers.json"
+)
+
+SWITCH_HISTORY_FILE = Path(__file__).with_name(
+    "model_switch_history.xlsx"
 )
 
 
@@ -173,6 +178,55 @@ def ensure_key_file():
         )
 
         wb.close()
+
+
+def save_switch_history(
+    nickname,
+    model
+):
+
+    now = datetime.now()
+
+    if SWITCH_HISTORY_FILE.exists():
+
+        wb = load_workbook(
+            SWITCH_HISTORY_FILE
+        )
+
+        ws = wb.active
+
+    else:
+
+        SWITCH_HISTORY_FILE.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        wb = Workbook()
+
+        ws = wb.active
+
+        ws.title = "Switch History"
+
+        ws.append([
+            "Date",
+            "Time",
+            "Nickname",
+            "Model"
+        ])
+
+    ws.append([
+        now.strftime("%Y-%m-%d"),
+        now.strftime("%H:%M:%S"),
+        nickname,
+        model
+    ])
+
+    wb.save(
+        SWITCH_HISTORY_FILE
+    )
+
+    wb.close()
 
 
 # ============================================================
@@ -1675,6 +1729,11 @@ class KeySwitcher(QMainWindow):
                 file.write(
                     "\n"
                 )
+
+            save_switch_history(
+                nickname,
+                model
+            )
 
             # ------------------------------------------------
             # SUCCESS
