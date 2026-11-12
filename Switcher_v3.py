@@ -600,6 +600,10 @@ class KeyManagerDialog(QDialog):
             "Provider Settings"
         )
 
+        tester_btn = QPushButton(
+            "API Tester"
+        )
+
         close_btn = QPushButton(
             "Close"
         )
@@ -616,6 +620,10 @@ class KeyManagerDialog(QDialog):
             self.provider_settings
         )
 
+        tester_btn.clicked.connect(
+            self.open_api_tester
+        )
+
         close_btn.clicked.connect(
             self.accept
         )
@@ -630,6 +638,10 @@ class KeyManagerDialog(QDialog):
 
         layout.addWidget(
             provider_btn
+        )
+
+        layout.addWidget(
+            tester_btn
         )
 
         layout.addWidget(
@@ -966,6 +978,34 @@ class KeyManagerDialog(QDialog):
         )
 
         dialog.exec()
+
+
+    # ========================================================
+    # API TESTER
+    # ========================================================
+
+    def open_api_tester(self):
+
+        import subprocess
+
+        tester_script = Path(__file__).with_name("api_tester.py")
+
+        if tester_script.exists():
+
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    str(tester_script)
+                ]
+            )
+
+        else:
+
+            QMessageBox.warning(
+                self,
+                "API Tester Not Found",
+                f"Could not find:\n{tester_script}"
+            )
 
 
 # ============================================================

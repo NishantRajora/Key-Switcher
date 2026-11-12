@@ -82,8 +82,9 @@ A typical project structure is:
 ```text
 Key Switcher/
 │
-├── Switcher_v3.py
-├── providers.json
+├── Switcher_v3.py      # Main Claude Code key & model switcher
+├── api_tester.py       # GUI API Tester (verifies Base URL, Key & Model)
+├── providers.json      # Provider endpoints and models list
 └── README.md
 ```
 
@@ -745,14 +746,39 @@ Close `keys.xlsx` in Excel and restart Key Switcher if necessary.
 From the project directory:
 
 ```powershell
-python Switcher_v2.py
+python Switcher_v3.py
 ```
 
 If the Python command is not available, try:
 
 ```powershell
-py Switcher_v2.py
+py Switcher_v3.py
 ```
+
+---
+
+# Running the API Tester (GUI)
+
+The API Tester allows you to verify whether any Base URL, API Key, and Model are working before applying them to Claude Code.
+
+### Launch Standalone:
+```powershell
+python api_tester.py
+```
+
+### Or Launch from Key Switcher:
+1. Open Key Switcher (`python Switcher_v3.py`).
+2. Click the `⋮` menu button.
+3. Click **API Tester**.
+
+### Features:
+- **Instant Status Indicator**: Clear, bold **WORKING** (Green) or **FAILED** (Red) banner.
+- **Latency & Response Metrics**: Displays response time in milliseconds and token usage.
+- **Auto-Protocol Detection**: Supports OpenAI Chat Completions (`/chat/completions`) and Anthropic Messages (`/messages`).
+- **Quick-Fill Presets**: Automatically loads providers from `providers.json` and saved keys from `keys.xlsx`.
+- **Save Presets**: Tested a new model or provider that works? Click **Save Preset** to immediately store it in `providers.json`.
+- **Diagnosis & Troubleshooting**: Explains exact causes for 401 Unauthorized, 404 Model Not Found, 429 Rate Limits, or network errors.
+- **Copy Diagnostic Report**: 1-click Markdown report copy to clipboard.
 
 ---
 
