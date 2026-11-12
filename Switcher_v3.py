@@ -1460,11 +1460,6 @@ class KeySwitcher(QMainWindow):
         # Show status
         # ----------------------------------------------------
 
-        base_url = provider_data.get(
-            "base_url",
-            ""
-        )
-
         self.status.setText(
             f"{provider} • {len(models)} model(s)"
         )

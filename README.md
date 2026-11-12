@@ -82,7 +82,7 @@ A typical project structure is:
 ```text
 Key Switcher/
 │
-├── Switcher_v2.py
+├── Switcher_v3.py
 ├── providers.json
 └── README.md
 ```
@@ -153,7 +153,7 @@ pip install PySide6 openpyxl
 Run the application:
 
 ```powershell
-python Switcher_v2.py
+python Switcher_v3.py
 ```
 
 ---
