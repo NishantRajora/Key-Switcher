@@ -557,12 +557,37 @@ def run_api_test(
 # DATA HELPERS (providers.json & keys.xlsx)
 # =============================================================================
 
+def find_key_file() -> Path:
+    candidates = [
+        Path(r"C:\My Space\Data\keys.xlsx"),
+        PROJECT_DIR / "keys.xlsx",
+        Path.cwd() / "keys.xlsx",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+def find_providers_file() -> Path:
+    candidates = [
+        PROJECT_DIR / "providers.json",
+        Path.cwd() / "providers.json",
+        Path(r"C:\My Space\GitHub Repo\Key-Switcher\providers.json"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
 def load_providers_json() -> Dict[str, Any]:
     """Loads provider presets from providers.json."""
-    if not PROVIDERS_FILE.exists():
+    pf = find_providers_file()
+    if not pf.exists():
         return {}
     try:
-        content = PROVIDERS_FILE.read_text(encoding="utf-8")
+        content = pf.read_text(encoding="utf-8")
         data = json.loads(content)
         return data.get("providers", {})
     except Exception:
@@ -571,14 +596,19 @@ def load_providers_json() -> Dict[str, Any]:
 
 def load_keys_from_excel() -> Dict[str, Dict[str, str]]:
     """
-    Loads saved API keys from C:\My Space\Data\keys.xlsx.
+    Loads saved API keys from keys.xlsx with robust dual-method reading:
+    Method 1: openpyxl
+    Method 2: Pure Python standard library (zipfile + xml.etree.ElementTree)
     Returns: { nickname: { 'provider': ..., 'key': ... } }
     """
-    if not KEY_FILE.exists():
+    kf = find_key_file()
+    if not kf.exists():
         return {}
+
+    # Method 1: openpyxl
     try:
         import openpyxl
-        wb = openpyxl.load_workbook(KEY_FILE, read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(kf, read_only=True, data_only=True)
         ws = wb.active
         headers = [str(ws.cell(1, c).value or "").strip().lower() for c in range(1, ws.max_column + 1)]
 
@@ -598,9 +628,80 @@ def load_keys_from_excel() -> Dict[str, Dict[str, str]]:
             prov = str(row[provider_col - 1] or "").strip() if len(row) >= provider_col else ""
             key = str(row[key_col - 1] or "").strip() if len(row) >= key_col else ""
             if key:
+                if key.lower().startswith("bearer "):
+                    key = key[7:].strip()
                 keys_data[nick] = {"provider": prov, "key": key}
         wb.close()
-        return keys_data
+        if keys_data:
+            return keys_data
+    except Exception:
+        pass
+
+    # Method 2: Pure Python standard library parser (Zero dependencies)
+    try:
+        import zipfile
+        import xml.etree.ElementTree as ET
+
+        with zipfile.ZipFile(kf, "r") as z:
+            # Shared strings
+            shared_strings = []
+            if "xl/sharedStrings.xml" in z.namelist():
+                ss_root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+                for si in ss_root.findall(".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si"):
+                    t = si.find(".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t")
+                    shared_strings.append(t.text if t is not None and t.text else "")
+
+            # Sheet 1
+            sheet_names = [n for n in z.namelist() if n.startswith("xl/worksheets/sheet")]
+            if not sheet_names:
+                return {}
+            sheet_root = ET.fromstring(z.read(sheet_names[0]))
+
+            rows_data = []
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            for row in sheet_root.findall(f".//{ns}row"):
+                row_vals = {}
+                for cell in row.findall(f"{ns}c"):
+                    ref = cell.attrib.get("r", "")
+                    col_letter = "".join(filter(str.isalpha, ref))
+                    t_attr = cell.attrib.get("t", "")
+                    v_elem = cell.find(f"{ns}v")
+                    val = v_elem.text if v_elem is not None else ""
+                    if t_attr == "s" and val.isdigit():
+                        idx = int(val)
+                        val = shared_strings[idx] if idx < len(shared_strings) else val
+                    row_vals[col_letter] = val
+                rows_data.append(row_vals)
+
+            if not rows_data:
+                return {}
+
+            header_row = rows_data[0]
+            col_map = {}
+            for col_letter, text in header_row.items():
+                low = str(text).strip().lower()
+                if "provider" in low:
+                    col_map["provider"] = col_letter
+                elif "nickname" in low:
+                    col_map["nickname"] = col_letter
+                elif "api key" in low or "key" in low:
+                    col_map["key"] = col_letter
+
+            prov_c = col_map.get("provider", "A")
+            nick_c = col_map.get("nickname", "B")
+            key_c = col_map.get("key", "C")
+
+            keys_data = {}
+            for r in rows_data[1:]:
+                nick = str(r.get(nick_c, "")).strip()
+                prov = str(r.get(prov_c, "")).strip()
+                key = str(r.get(key_c, "")).strip()
+                if nick and key:
+                    if key.lower().startswith("bearer "):
+                        key = key[7:].strip()
+                    keys_data[nick] = {"provider": prov, "key": key}
+
+            return keys_data
     except Exception:
         return {}
 
@@ -637,6 +738,264 @@ def save_provider_to_json(provider_name: str, base_url: str, model: str) -> Tupl
 
 
 # =============================================================================
+# MODERN DARK THEME STYLESHEET (Matches Switcher_v3.py & fixes combo popups)
+# =============================================================================
+
+API_TESTER_STYLESHEET = """
+QWidget {
+    background-color: #12131c;
+    color: #e2e8f0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow, QDialog {
+    background-color: #12131c;
+}
+
+/* Card Containers & Group Boxes */
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #2d3148;
+    border-radius: 9px;
+    margin-top: 10px;
+    padding-top: 14px;
+    background-color: #1a1c2b;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 6px;
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+/* Labels */
+QLabel {
+    color: #cbd5e1;
+    font-size: 13px;
+}
+
+/* Form Inputs & Comboboxes */
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #222638;
+    border: 1px solid #363b57;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #f8fafc;
+    font-size: 13px;
+    min-height: 22px;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: 1.5px solid #6366f1;
+    background-color: #272c40;
+}
+
+/* Editable Combobox Support */
+QComboBox:editable {
+    background-color: #222638;
+    color: #f8fafc;
+}
+
+QComboBox:editable:focus {
+    border: 1.5px solid #6366f1;
+    background-color: #272c40;
+}
+
+QComboBox QLineEdit {
+    background-color: transparent;
+    color: #f8fafc;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+}
+
+/* Combobox Arrow */
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border-left: 1px solid #363b57;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QComboBox::down-arrow {
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #94a3b8;
+}
+
+QComboBox::down-arrow:hover {
+    border-top-color: #6366f1;
+}
+
+/* Combobox Dropdown Popups (QAbstractItemView & QListView) - Guaranteed High Visibility */
+QComboBox QAbstractItemView, QListView {
+    background-color: #1a1c2b;
+    color: #f8fafc;
+    border: 1px solid #3b4263;
+    border-radius: 8px;
+    padding: 4px;
+    selection-background-color: #6366f1;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item, QListView::item {
+    min-height: 28px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    color: #f8fafc;
+}
+
+QComboBox QAbstractItemView::item:hover, QListView::item:hover {
+    background-color: #2b3047;
+    color: #ffffff;
+}
+
+QComboBox QAbstractItemView::item:selected, QListView::item:selected {
+    background-color: #6366f1;
+    color: #ffffff;
+}
+
+/* Action Buttons */
+QPushButton {
+    background-color: #222638;
+    border: 1px solid #363b57;
+    border-radius: 6px;
+    padding: 7px 14px;
+    color: #cbd5e1;
+    font-weight: 500;
+}
+
+QPushButton:hover {
+    background-color: #2c324a;
+    border-color: #4b5275;
+    color: #f8fafc;
+}
+
+QPushButton:pressed {
+    background-color: #1a1e2e;
+}
+
+QPushButton:disabled {
+    background-color: #181a26;
+    border-color: #25283b;
+    color: #64748b;
+}
+
+QPushButton#testBtn {
+    background-color: #6366f1;
+    border: 1px solid #6366f1;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 8px 22px;
+}
+
+QPushButton#testBtn:hover {
+    background-color: #4f46e5;
+    border-color: #4f46e5;
+}
+
+QPushButton#testBtn:disabled {
+    background-color: #312e81;
+    border-color: #312e81;
+    color: #94a3b8;
+}
+
+/* Text Editors */
+QTextEdit {
+    background-color: #161824;
+    border: 1px solid #2d3148;
+    border-radius: 6px;
+    color: #f8fafc;
+    padding: 10px;
+    font-size: 12px;
+}
+
+/* Tabs & Tab Bars */
+QTabWidget::pane {
+    border: 1px solid #2d3148;
+    border-radius: 6px;
+    background-color: #1a1c2b;
+}
+
+QTabBar::tab {
+    background-color: #161824;
+    color: #94a3b8;
+    border: 1px solid #2d3148;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 8px 16px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background-color: #1a1c2b;
+    color: #f8fafc;
+    font-weight: bold;
+    border-bottom: 2px solid #6366f1;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #222638;
+    color: #cbd5e1;
+}
+
+/* Tables */
+QTableWidget {
+    background-color: #161824;
+    border: 1px solid #2d3148;
+    border-radius: 6px;
+    color: #f8fafc;
+    gridline-color: #2d3148;
+}
+
+QTableWidget QHeaderView::section {
+    background-color: #1a1c2b;
+    color: #94a3b8;
+    padding: 6px;
+    border: 1px solid #2d3148;
+    font-weight: bold;
+}
+
+QTableWidget::item:selected {
+    background-color: #6366f1;
+    color: #ffffff;
+}
+
+/* Scrollbars */
+QScrollBar:vertical {
+    background-color: #161824;
+    width: 8px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #363b57;
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #6366f1;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+"""
+
+
+# =============================================================================
 # PYSIDE6 IMPLEMENTATION (Primary GUI)
 # =============================================================================
 
@@ -665,6 +1024,7 @@ def run_pyside6_gui():
         QHeaderView,
         QMessageBox,
         QInputDialog,
+        QListView,
     )
     from PySide6.QtGui import QFont, QColor
 
@@ -690,8 +1050,8 @@ def run_pyside6_gui():
             self.history: List[Tuple[str, str, str, str, str, str]] = []
 
             self.setWindowTitle("Key Switcher - API Connection Tester")
-            self.resize(780, 680)
-            self.setMinimumSize(640, 500)
+            self.resize(780, 660)
+            self.setMinimumSize(640, 480)
 
             self.setup_ui()
             self.apply_theme()
@@ -701,8 +1061,8 @@ def run_pyside6_gui():
             central = QWidget()
             self.setCentralWidget(central)
             main_layout = QVBoxLayout(central)
-            main_layout.setContentsMargins(16, 14, 16, 14)
-            main_layout.setSpacing(10)
+            main_layout.setContentsMargins(18, 16, 18, 16)
+            main_layout.setSpacing(12)
 
             # -----------------------------------------------------------------
             # 1. Header
@@ -710,9 +1070,9 @@ def run_pyside6_gui():
             header_layout = QHBoxLayout()
             title_vbox = QVBoxLayout()
             title_lbl = QLabel("API Connection Tester")
-            title_lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #2563eb;")
+            title_lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #818cf8;")
             subtitle_lbl = QLabel("Test Base URL, API Key, and Model connectivity in real time")
-            subtitle_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
+            subtitle_lbl.setStyleSheet("font-size: 12px; color: #94a3b8;")
             title_vbox.addWidget(title_lbl)
             title_vbox.addWidget(subtitle_lbl)
             header_layout.addLayout(title_vbox)
@@ -720,8 +1080,8 @@ def run_pyside6_gui():
 
             self.badge_lbl = QLabel("READY")
             self.badge_lbl.setStyleSheet(
-                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
-                "padding: 4px 12px; border-radius: 12px; font-size: 11px;"
+                "background-color: #272c40; color: #94a3b8; font-weight: bold; "
+                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
             )
             header_layout.addWidget(self.badge_lbl)
             main_layout.addLayout(header_layout)
@@ -731,16 +1091,20 @@ def run_pyside6_gui():
             # -----------------------------------------------------------------
             preset_group = QGroupBox("Presets & Auto-Fill")
             preset_layout = QGridLayout(preset_group)
-            preset_layout.setContentsMargins(12, 10, 12, 10)
-            preset_layout.setSpacing(8)
+            preset_layout.setContentsMargins(14, 12, 14, 12)
+            preset_layout.setSpacing(10)
 
             preset_layout.addWidget(QLabel("Provider Preset:"), 0, 0)
             self.provider_combo = QComboBox()
+            self.provider_combo.setView(QListView())
+            self.provider_combo.setMaxVisibleItems(12)
             self.provider_combo.currentIndexChanged.connect(self.on_provider_selected)
             preset_layout.addWidget(self.provider_combo, 0, 1)
 
             preset_layout.addWidget(QLabel("Saved Key (keys.xlsx):"), 0, 2)
             self.saved_key_combo = QComboBox()
+            self.saved_key_combo.setView(QListView())
+            self.saved_key_combo.setMaxVisibleItems(12)
             self.saved_key_combo.currentIndexChanged.connect(self.on_saved_key_selected)
             preset_layout.addWidget(self.saved_key_combo, 0, 3)
 
@@ -751,12 +1115,12 @@ def run_pyside6_gui():
             # -----------------------------------------------------------------
             form_group = QGroupBox("API Configuration")
             form_layout = QFormLayout(form_group)
-            form_layout.setContentsMargins(12, 10, 12, 10)
-            form_layout.setSpacing(8)
+            form_layout.setContentsMargins(14, 12, 14, 12)
+            form_layout.setSpacing(10)
 
             # Base URL
             self.url_edit = QLineEdit()
-            self.url_edit.setPlaceholderText("e.g. https://openrouter.ai/api/v1 or https://router.huggingface.co/v1")
+            self.url_edit.setPlaceholderText("e.g. https://openrouter.ai/api/v1 or https://api.groq.com/openai/v1")
             form_layout.addRow("Base URL *:", self.url_edit)
 
             # API Key
@@ -765,7 +1129,7 @@ def run_pyside6_gui():
             self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self.key_edit.setPlaceholderText("Enter API Key (optional for local Ollama)")
             self.toggle_key_btn = QPushButton("👁 Show")
-            self.toggle_key_btn.setFixedWidth(70)
+            self.toggle_key_btn.setFixedWidth(74)
             self.toggle_key_btn.clicked.connect(self.toggle_key_visibility)
             key_layout.addWidget(self.key_edit)
             key_layout.addWidget(self.toggle_key_btn)
@@ -774,11 +1138,15 @@ def run_pyside6_gui():
             # Model (Editable combo box)
             self.model_combo = QComboBox()
             self.model_combo.setEditable(True)
-            self.model_combo.setPlaceholderText("e.g. openai/gpt-oss-120b or nemotron-3-nano:30b")
+            self.model_combo.setView(QListView())
+            self.model_combo.setMaxVisibleItems(12)
+            self.model_combo.setPlaceholderText("e.g. openai/gpt-oss-120b or llama-3.3-70b-versatile")
             form_layout.addRow("Model *:", self.model_combo)
 
             # Protocol
             self.protocol_combo = QComboBox()
+            self.protocol_combo.setView(QListView())
+            self.protocol_combo.setMaxVisibleItems(12)
             self.protocol_combo.addItem("Auto-Detect (OpenAI & Anthropic)", "auto")
             self.protocol_combo.addItem("OpenAI Compatible (/chat/completions)", "openai")
             self.protocol_combo.addItem("Anthropic Compatible (/messages)", "anthropic")
@@ -788,45 +1156,12 @@ def run_pyside6_gui():
             main_layout.addWidget(form_group)
 
             # -----------------------------------------------------------------
-            # 4. Advanced Options (Collapsible / Toggleable)
-            # -----------------------------------------------------------------
-            adv_group = QGroupBox("Advanced Settings")
-            adv_layout = QGridLayout(adv_group)
-            adv_layout.setContentsMargins(12, 8, 12, 8)
-            adv_layout.setSpacing(8)
-
-            adv_layout.addWidget(QLabel("Prompt:"), 0, 0)
-            self.prompt_edit = QLineEdit(DEFAULT_PROMPT)
-            adv_layout.addWidget(self.prompt_edit, 0, 1, 1, 3)
-
-            adv_layout.addWidget(QLabel("Max Tokens:"), 1, 0)
-            self.tokens_spin = QSpinBox()
-            self.tokens_spin.setRange(4, 2048)
-            self.tokens_spin.setValue(DEFAULT_MAX_TOKENS)
-            adv_layout.addWidget(self.tokens_spin, 1, 1)
-
-            adv_layout.addWidget(QLabel("Timeout (s):"), 1, 2)
-            self.timeout_spin = QSpinBox()
-            self.timeout_spin.setRange(5, 120)
-            self.timeout_spin.setValue(DEFAULT_TIMEOUT)
-            adv_layout.addWidget(self.timeout_spin, 1, 3)
-
-            self.ssl_check = QCheckBox("Verify SSL Certificates")
-            self.ssl_check.setChecked(True)
-            adv_layout.addWidget(self.ssl_check, 1, 4)
-
-            main_layout.addWidget(adv_group)
-
-            # -----------------------------------------------------------------
-            # 5. Action Buttons & Progress
+            # 4. Action Buttons & Progress
             # -----------------------------------------------------------------
             btn_layout = QHBoxLayout()
             self.test_btn = QPushButton("🚀 TEST API")
+            self.test_btn.setObjectName("testBtn")
             self.test_btn.setMinimumHeight(40)
-            self.test_btn.setStyleSheet(
-                "background-color: #2563eb; color: white; font-weight: bold; "
-                "font-size: 13px; border-radius: 6px; padding: 0 20px;"
-            )
             self.test_btn.clicked.connect(self.start_test)
             btn_layout.addWidget(self.test_btn)
 
@@ -862,7 +1197,7 @@ def run_pyside6_gui():
             main_layout.addWidget(self.progress_bar)
 
             # -----------------------------------------------------------------
-            # 6. Status Banner (Prominent Working/Failed Card)
+            # 5. Status Banner (Prominent Working/Failed Card)
             # -----------------------------------------------------------------
             self.status_banner = QLabel("Ready to test. Enter connection details and click 'TEST API'.")
             self.status_banner.setWordWrap(True)
@@ -871,14 +1206,14 @@ def run_pyside6_gui():
             main_layout.addWidget(self.status_banner)
 
             # -----------------------------------------------------------------
-            # 7. Results Tabs
+            # 6. Results Tabs
             # -----------------------------------------------------------------
             self.tabs = QTabWidget()
 
             # Tab 1: Overview
             tab_overview = QWidget()
             tab_over_layout = QVBoxLayout(tab_overview)
-            tab_over_layout.setContentsMargins(8, 8, 8, 8)
+            tab_over_layout.setContentsMargins(10, 10, 10, 10)
 
             meta_grid = QGridLayout()
             meta_grid.addWidget(QLabel("<b>Status:</b>"), 0, 0)
@@ -911,17 +1246,17 @@ def run_pyside6_gui():
             # Tab 2: Raw Response & Headers
             tab_raw = QWidget()
             tab_raw_layout = QVBoxLayout(tab_raw)
-            tab_raw_layout.setContentsMargins(8, 8, 8, 8)
+            tab_raw_layout.setContentsMargins(10, 10, 10, 10)
             self.raw_text = QTextEdit()
             self.raw_text.setReadOnly(True)
-            self.raw_text.setFont(QFont("Consolas", 9))
+            self.raw_text.setFont(QFont("Consolas", 10))
             tab_raw_layout.addWidget(self.raw_text)
             self.tabs.addTab(tab_raw, "Raw Response")
 
             # Tab 3: History
             tab_hist = QWidget()
             tab_hist_layout = QVBoxLayout(tab_hist)
-            tab_hist_layout.setContentsMargins(8, 8, 8, 8)
+            tab_hist_layout.setContentsMargins(10, 10, 10, 10)
             self.history_table = QTableWidget(0, 5)
             self.history_table.setHorizontalHeaderLabels(["Time", "Model", "Result", "HTTP Code", "Latency"])
             self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -931,83 +1266,34 @@ def run_pyside6_gui():
             main_layout.addWidget(self.tabs)
 
         def apply_theme(self):
-            self.setStyleSheet("""
-                QMainWindow {
-                    background-color: #f8fafc;
-                }
-                QGroupBox {
-                    font-weight: bold;
-                    border: 1px solid #cbd5e1;
-                    border-radius: 8px;
-                    margin-top: 10px;
-                    padding-top: 12px;
-                    background-color: #ffffff;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    subcontrol-position: top left;
-                    left: 12px;
-                    padding: 0 4px;
-                    color: #334155;
-                }
-                QLineEdit, QComboBox, QSpinBox {
-                    border: 1px solid #cbd5e1;
-                    border-radius: 5px;
-                    padding: 6px 8px;
-                    background-color: #ffffff;
-                    color: #0f172a;
-                    font-size: 12px;
-                }
-                QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-                    border: 1px solid #2563eb;
-                }
-                QPushButton {
-                    border: 1px solid #cbd5e1;
-                    border-radius: 5px;
-                    padding: 6px 12px;
-                    background-color: #ffffff;
-                    color: #334155;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background-color: #f1f5f9;
-                }
-                QTextEdit {
-                    border: 1px solid #cbd5e1;
-                    border-radius: 6px;
-                    background-color: #ffffff;
-                    color: #0f172a;
-                    padding: 8px;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #cbd5e1;
-                    border-radius: 6px;
-                    background-color: #ffffff;
-                }
-            """)
+            app_inst = QApplication.instance()
+            if app_inst:
+                app_inst.setStyleSheet(API_TESTER_STYLESHEET)
+            else:
+                self.setStyleSheet(API_TESTER_STYLESHEET)
 
         def set_banner_idle(self):
             self.status_banner.setText("Ready to test. Enter connection details and click 'TEST API'.")
             self.status_banner.setStyleSheet(
-                "background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; "
-                "border-radius: 8px; padding: 10px; font-size: 13px; font-weight: bold;"
+                "background-color: #1e2235; color: #94a3b8; border: 1px solid #2d3148; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("READY")
             self.badge_lbl.setStyleSheet(
-                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
-                "padding: 4px 12px; border-radius: 12px; font-size: 11px;"
+                "background-color: #272c40; color: #94a3b8; font-weight: bold; "
+                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_testing(self, target: str):
             self.status_banner.setText(f"⏳ Testing connection to: {target} ...")
             self.status_banner.setStyleSheet(
-                "background-color: #eff6ff; color: #1e40af; border: 1px solid #93c5fd; "
-                "border-radius: 8px; padding: 10px; font-size: 13px; font-weight: bold;"
+                "background-color: #1e293b; color: #60a5fa; border: 1px solid #3b82f6; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("TESTING...")
             self.badge_lbl.setStyleSheet(
-                "background-color: #bfdbfe; color: #1e3a8a; font-weight: bold; "
-                "padding: 4px 12px; border-radius: 12px; font-size: 11px;"
+                "background-color: #1d4ed8; color: #ffffff; font-weight: bold; "
+                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_success(self, res: ApiTestResult):
@@ -1015,13 +1301,13 @@ def run_pyside6_gui():
                 f"✔ WORKING! (HTTP {res.status_code}) — Response time: {res.latency_ms:.1f} ms"
             )
             self.status_banner.setStyleSheet(
-                "background-color: #dcfce7; color: #14532d; border: 1px solid #86efac; "
-                "border-radius: 8px; padding: 10px; font-size: 13px; font-weight: bold;"
+                "background-color: #14532d; color: #bbf7d0; border: 1px solid #22c55e; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("WORKING")
             self.badge_lbl.setStyleSheet(
-                "background-color: #22c55e; color: white; font-weight: bold; "
-                "padding: 4px 12px; border-radius: 12px; font-size: 11px;"
+                "background-color: #16a34a; color: #ffffff; font-weight: bold; "
+                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_failure(self, res: ApiTestResult):
@@ -1030,20 +1316,20 @@ def run_pyside6_gui():
                 f"✖ NOT WORKING — {status_desc}: {res.status_message}"
             )
             self.status_banner.setStyleSheet(
-                "background-color: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; "
-                "border-radius: 8px; padding: 10px; font-size: 13px; font-weight: bold;"
+                "background-color: #450a0a; color: #fecaca; border: 1px solid #ef4444; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("FAILED")
             self.badge_lbl.setStyleSheet(
-                "background-color: #ef4444; color: white; font-weight: bold; "
-                "padding: 4px 12px; border-radius: 12px; font-size: 11px;"
+                "background-color: #dc2626; color: #ffffff; font-weight: bold; "
+                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def populate_presets(self):
             # 1. Populate Provider Presets
             self.provider_combo.blockSignals(True)
             self.provider_combo.addItem("Select a Preset / Provider...", "")
-            for prov_name, prov_info in self.providers.items():
+            for prov_name in self.providers.keys():
                 self.provider_combo.addItem(prov_name, prov_name)
             self.provider_combo.addItem("Custom", "Custom")
             self.provider_combo.blockSignals(False)
@@ -1075,21 +1361,60 @@ def run_pyside6_gui():
             if models:
                 self.model_combo.setCurrentIndex(0)
 
+            # Auto-match saved key if one exists for this provider
+            for nick, data in self.saved_keys.items():
+                if data.get("provider", "").strip().lower() == prov_name.strip().lower():
+                    for i in range(self.saved_key_combo.count()):
+                        if self.saved_key_combo.itemData(i) == nick:
+                            self.saved_key_combo.blockSignals(True)
+                            self.saved_key_combo.setCurrentIndex(i)
+                            self.saved_key_combo.blockSignals(False)
+                            k = data.get("key", "").strip()
+                            if k.lower().startswith("bearer "):
+                                k = k[7:].strip()
+                            self.key_edit.setText(k)
+                            break
+                    break
+
         def on_saved_key_selected(self, index: int):
             nick = self.saved_key_combo.currentData()
             if not nick or nick not in self.saved_keys:
                 return
             key_info = self.saved_keys[nick]
-            api_key = key_info.get("key", "")
-            prov_name = key_info.get("provider", "")
+            api_key = key_info.get("key", "").strip()
+            if api_key.lower().startswith("bearer "):
+                api_key = api_key[7:].strip()
+            prov_name = key_info.get("provider", "").strip()
 
             self.key_edit.setText(api_key)
 
-            # If provider matches, select it
-            for i in range(self.provider_combo.count()):
-                if self.provider_combo.itemData(i) == prov_name:
-                    self.provider_combo.setCurrentIndex(i)
+            # Match provider case-insensitively
+            matched_prov = None
+            for p_name in self.providers.keys():
+                if p_name.strip().lower() == prov_name.lower():
+                    matched_prov = p_name
                     break
+
+            if matched_prov:
+                for i in range(self.provider_combo.count()):
+                    if str(self.provider_combo.itemData(i)).lower() == matched_prov.lower():
+                        self.provider_combo.blockSignals(True)
+                        self.provider_combo.setCurrentIndex(i)
+                        self.provider_combo.blockSignals(False)
+                        break
+
+                prov_info = self.providers.get(matched_prov, {})
+                base_url = prov_info.get("base_url", "")
+                models = prov_info.get("models", [])
+
+                if base_url:
+                    self.url_edit.setText(base_url)
+
+                self.model_combo.clear()
+                for m in models:
+                    self.model_combo.addItem(m)
+                if models:
+                    self.model_combo.setCurrentIndex(0)
 
         def toggle_key_visibility(self):
             if self.key_edit.echoMode() == QLineEdit.EchoMode.Password:
@@ -1103,11 +1428,11 @@ def run_pyside6_gui():
             base_url = self.url_edit.text().strip()
             model = self.model_combo.currentText().strip()
             api_key = self.key_edit.text().strip()
-            protocol = self.protocol_combo.currentData()
-            prompt = self.prompt_edit.text().strip() or DEFAULT_PROMPT
-            max_tokens = self.tokens_spin.value()
-            timeout = self.timeout_spin.value()
-            verify_ssl = self.ssl_check.isChecked()
+            protocol = self.protocol_combo.currentData() or "auto"
+            prompt = DEFAULT_PROMPT
+            max_tokens = DEFAULT_MAX_TOKENS
+            timeout = DEFAULT_TIMEOUT
+            verify_ssl = True
 
             if not base_url:
                 QMessageBox.warning(self, "Missing URL", "Please enter a Base URL.")
@@ -1259,6 +1584,8 @@ def run_pyside6_gui():
             self.copy_btn.setEnabled(False)
 
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(API_TESTER_STYLESHEET)
     window = ApiTesterWindow()
     window.show()
     sys.exit(app.exec())
@@ -1393,6 +1720,8 @@ def run_tkinter_gui():
 
         def on_provider_selected(self, event=None):
             sel = self.provider_var.get()
+            if not sel or sel in ("(Select Preset)", "Custom"):
+                return
             if sel in self.providers:
                 info = self.providers[sel]
                 self.url_var.set(info.get("base_url", ""))
@@ -1401,16 +1730,44 @@ def run_tkinter_gui():
                 if models:
                     self.model_var.set(models[0])
 
+            # Auto-match saved key if one exists for this provider
+            for nick, data in self.saved_keys.items():
+                if data.get("provider", "").strip().lower() == sel.strip().lower():
+                    k = data.get("key", "").strip()
+                    if k.lower().startswith("bearer "):
+                        k = k[7:].strip()
+                    self.key_var.set(k)
+                    for item in self.key_combo["values"]:
+                        if item.startswith(nick):
+                            self.key_select_var.set(item)
+                            break
+                    break
+
         def on_saved_key_selected(self, event=None):
             sel = self.key_select_var.get()
             nick = sel.split(" (")[0]
             if nick in self.saved_keys:
                 data = self.saved_keys[nick]
-                self.key_var.set(data.get("key", ""))
-                prov = data.get("provider", "")
-                if prov in self.providers:
-                    self.provider_var.set(prov)
-                    self.on_provider_selected()
+                k = data.get("key", "").strip()
+                if k.lower().startswith("bearer "):
+                    k = k[7:].strip()
+                self.key_var.set(k)
+                prov = data.get("provider", "").strip()
+
+                # Case-insensitive provider match
+                matched = None
+                for p in self.providers.keys():
+                    if p.strip().lower() == prov.lower():
+                        matched = p
+                        break
+                if matched:
+                    self.provider_var.set(matched)
+                    info = self.providers[matched]
+                    self.url_var.set(info.get("base_url", ""))
+                    models = info.get("models", [])
+                    self.model_combo["values"] = models
+                    if models:
+                        self.model_var.set(models[0])
 
         def toggle_key(self):
             if self.key_entry.cget("show") == "":

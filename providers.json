@@ -33,6 +33,15 @@
         "google/gemma-4-31B-it:novita"
       ]
     },
+    "groq": {
+      "base_url": "https://api.groq.com/openai/v1",
+      "models": [
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    
     "NVIDIA": {
       "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
       "models": [
