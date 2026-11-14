@@ -58,34 +58,6 @@ MODEL_SETTINGS = [
 ]
 
 
-# ============================================================
-# DEFAULT PROVIDERS
-#
-# This matches your providers.json structure.
-# ============================================================
-
-DEFAULT_PROVIDERS = {
-    "providers": {
-        "Ollama": {
-            "base_url": "https://ollama.com",
-            "models": [
-                "gemma4:31b",
-                "gpt-oss:120b",
-                "gpt-oss:20b",
-                "nemotron-3-nano:30b",
-                "nemotron-3-super",
-                "nemotron-3-ultra"
-            ]
-        },
-
-        "Hugging Face": {
-            "base_url": "https://router.huggingface.co/v1",
-            "models": [
-                "Qwen/Qwen3.8-27B"
-            ]
-        }
-    }
-}
 
 
 # ============================================================
