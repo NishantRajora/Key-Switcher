@@ -1,19 +1,20 @@
 """
 ===============================================================================
-Key-Switcher: GUI API Tester
+Key-Switcher: GUI API Tester (Professional White & Sapphire Theme)
 ===============================================================================
-A lightweight GUI tool to verify Base URL, API Key, and Model connectivity
+A lightweight, modern GUI tool to verify Base URL, API Key, and Model connectivity
 for LLM providers (OpenAI-compatible, Anthropic-compatible, Ollama, OpenRouter,
-Hugging Face, NVIDIA, etc.).
+Hugging Face, NVIDIA, Groq, etc.).
 
 Features:
+- Professional executive white theme with high-contrast typography & sapphire blue accents.
 - Test any Base URL, API Key, and Model with 1 click.
 - Auto-detects OpenAI vs Anthropic endpoint formats & normalizes URLs.
-- Clear visual status: WORKING (Green) vs NOT WORKING (Red) with response time.
+- Clear visual status: WORKING (Green) vs NOT WORKING (Red) with response latency.
 - Displays model response text, token usage, latency, and full raw JSON.
-- Integrates with providers.json and keys.xlsx for quick-fill presets.
+- Bidirectional auto-fill with providers.json and keys.xlsx presets.
 - Non-blocking asynchronous network requests with cancel support.
-- Primary GUI: PySide6 (matches Key-Switcher).
+- Primary GUI: PySide6 (with Fusion style for crisp dropdown visibility).
 - Fallback GUI: Tkinter (runs out of the box with standard Python library).
 ===============================================================================
 """
@@ -107,7 +108,7 @@ class ApiTestResult:
 def get_troubleshooting_advice(status_code: int, error_text: str, endpoint: str) -> str:
     """Provides actionable advice based on HTTP status code and error messages."""
     error_lower = error_text.lower()
-    
+
     if status_code == 401:
         return (
             "Authentication Failed (401): The API Key is invalid, expired, or missing "
@@ -141,18 +142,17 @@ def get_troubleshooting_advice(status_code: int, error_text: str, endpoint: str)
     elif "certificate_verify_failed" in error_lower:
         return (
             "SSL Certificate Verification Failed: Your network or proxy intercepted the request. "
-            "Try disabling 'Verify SSL' in Advanced Settings if using a self-signed proxy."
+            "Check your local proxy/firewall settings."
         )
     elif "timed out" in error_lower:
         return (
-            "Connection Timed Out: The server did not respond in time. Check the host or "
-            "increase the timeout in Advanced Settings."
+            "Connection Timed Out: The server did not respond in time. Check provider status or network latency."
         )
     elif "getaddrinfo failed" in error_lower or "name resolution" in error_lower:
         return "DNS Lookup Failed: Hostname could not be resolved. Check Base URL spelling."
     elif "connection refused" in error_lower:
         return "Connection Refused: Target port is closed or server is not running (e.g. Ollama offline)."
-    
+
     return "Check Base URL, API Key, and Model name for typographical errors."
 
 
@@ -172,7 +172,6 @@ def extract_model_reply(data: Any) -> str:
                 if isinstance(content, str):
                     return content.strip()
                 elif isinstance(content, list):
-                    # Multi-part content
                     parts = []
                     for part in content:
                         if isinstance(part, dict) and "text" in part:
@@ -255,18 +254,18 @@ def build_candidate_endpoints(base_url: str, protocol: str) -> List[Tuple[str, s
     if not clean_url:
         return []
 
-    # Auto-add scheme if missing (e.g. user typed openrouter.ai/api or localhost:11434)
+    # Auto-add scheme if missing
     if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
         if clean_url.startswith("localhost") or clean_url.startswith("127.0.0.1"):
             clean_url = "http://" + clean_url
         else:
             clean_url = "https://" + clean_url
 
-    # If protocol is forced to Direct URL, use as-is with openai payload style
+    # Forced Direct URL
     if protocol == "direct":
         return [(clean_url, "openai")]
 
-    # If user selected Anthropic explicitly
+    # Forced Anthropic
     if protocol == "anthropic":
         if clean_url.endswith("/messages"):
             return [(clean_url, "anthropic")]
@@ -277,7 +276,7 @@ def build_candidate_endpoints(base_url: str, protocol: str) -> List[Tuple[str, s
             (f"{clean_url}/messages", "anthropic"),
         ]
 
-    # If user selected OpenAI explicitly
+    # Forced OpenAI
     if protocol == "openai":
         if clean_url.endswith("/chat/completions"):
             return [(clean_url, "openai")]
@@ -289,7 +288,6 @@ def build_candidate_endpoints(base_url: str, protocol: str) -> List[Tuple[str, s
         ]
 
     # AUTO-DETECT MODE:
-    # 1. If URL contains /messages or anthropic
     if clean_url.endswith("/messages") or "anthropic" in clean_url.lower():
         if clean_url.endswith("/messages"):
             return [(clean_url, "anthropic")]
@@ -300,11 +298,9 @@ def build_candidate_endpoints(base_url: str, protocol: str) -> List[Tuple[str, s
             (f"{clean_url}/messages", "anthropic"),
         ]
 
-    # 2. If URL already ends with /chat/completions
     if clean_url.endswith("/chat/completions"):
         return [(clean_url, "openai")]
 
-    # 3. Standard OpenAI candidates first, then Anthropic candidates
     candidates = []
     if clean_url.endswith("/v1"):
         candidates.append((f"{clean_url}/chat/completions", "openai"))
@@ -335,7 +331,6 @@ def perform_single_api_call(
     Executes a single HTTP POST request.
     Returns: (is_success, status_code, response_body_text, latency_ms, status_phrase, headers)
     """
-    # 1. Build Payload
     if protocol_style == "anthropic":
         payload = {
             "model": model,
@@ -352,27 +347,22 @@ def perform_single_api_call(
 
     post_data = json.dumps(payload).encode("utf-8")
 
-    # 2. Build Headers
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "KeySwitcher-APITester/1.0",
     }
     if api_key.strip():
-        # OpenRouter / OpenAI standard
         headers["Authorization"] = f"Bearer {api_key.strip()}"
-        # Anthropic standard
         if protocol_style == "anthropic":
             headers["x-api-key"] = api_key.strip()
             headers["anthropic-version"] = "2023-06-01"
-        # OpenRouter metadata (optional, best practice)
         if "openrouter.ai" in endpoint_url:
             headers["HTTP-Referer"] = "https://github.com/Key-Switcher"
             headers["X-Title"] = "Key Switcher API Tester"
 
     req = urllib.request.Request(endpoint_url, data=post_data, headers=headers, method="POST")
 
-    # 3. SSL Context
     ssl_context = ssl.create_default_context()
     if not verify_ssl:
         ssl_context.check_hostname = False
@@ -488,7 +478,6 @@ def run_api_test(
             verify_ssl=verify_ssl,
         )
 
-        # Attempt to parse body as JSON
         parsed_json = None
         try:
             parsed_json = json.loads(body_text)
@@ -496,7 +485,6 @@ def run_api_test(
             parsed_json = None
 
         if is_success and status_code == 200:
-            # Model output and token usage
             model_reply = extract_model_reply(parsed_json) if parsed_json else body_text.strip()
             token_usage = extract_token_usage(parsed_json) if parsed_json else ""
             raw_formatted = json.dumps(parsed_json, indent=2) if parsed_json else body_text
@@ -515,7 +503,6 @@ def run_api_test(
                 troubleshooting="Everything is working! This configuration can be used in Key-Switcher.",
             )
 
-        # Handle failure
         error_msg = extract_error_message(parsed_json) if parsed_json else body_text
         advice = get_troubleshooting_advice(status_code, error_msg or body_text, endpoint_url)
         raw_formatted = json.dumps(parsed_json, indent=2) if parsed_json else body_text
@@ -535,11 +522,9 @@ def run_api_test(
 
         last_failure_result = result
 
-        # If 404 and we have more candidates in auto mode, keep trying next candidate
         if status_code == 404 and len(candidates) > 1:
             continue
         else:
-            # For 401, 403, 429, etc., don't loop through further candidates; return immediate failure
             break
 
     return last_failure_result or ApiTestResult(
@@ -643,7 +628,6 @@ def load_keys_from_excel() -> Dict[str, Dict[str, str]]:
         import xml.etree.ElementTree as ET
 
         with zipfile.ZipFile(kf, "r") as z:
-            # Shared strings
             shared_strings = []
             if "xl/sharedStrings.xml" in z.namelist():
                 ss_root = ET.fromstring(z.read("xl/sharedStrings.xml"))
@@ -651,7 +635,6 @@ def load_keys_from_excel() -> Dict[str, Dict[str, str]]:
                     t = si.find(".//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t")
                     shared_strings.append(t.text if t is not None and t.text else "")
 
-            # Sheet 1
             sheet_names = [n for n in z.namelist() if n.startswith("xl/worksheets/sheet")]
             if not sheet_names:
                 return {}
@@ -738,29 +721,29 @@ def save_provider_to_json(provider_name: str, base_url: str, model: str) -> Tupl
 
 
 # =============================================================================
-# MODERN DARK THEME STYLESHEET (Matches Switcher_v3.py & fixes combo popups)
+# PROFESSIONAL WHITE & SAPPHIRE BLUE THEME (Clean, Crisp, High-Contrast)
 # =============================================================================
 
 API_TESTER_STYLESHEET = """
 QWidget {
-    background-color: #12131c;
-    color: #e2e8f0;
+    background-color: #f8fafc;
+    color: #0f172a;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     font-size: 13px;
 }
 
 QMainWindow, QDialog {
-    background-color: #12131c;
+    background-color: #f8fafc;
 }
 
 /* Card Containers & Group Boxes */
 QGroupBox {
-    font-weight: bold;
-    border: 1px solid #2d3148;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
     border-radius: 9px;
     margin-top: 10px;
     padding-top: 14px;
-    background-color: #1a1c2b;
+    background-color: #ffffff;
 }
 
 QGroupBox::title {
@@ -768,46 +751,48 @@ QGroupBox::title {
     subcontrol-position: top left;
     left: 12px;
     padding: 0 6px;
-    color: #94a3b8;
+    color: #1e40af;
     font-size: 12px;
+    font-weight: 700;
+    background-color: transparent;
 }
 
 /* Labels */
 QLabel {
-    color: #cbd5e1;
+    color: #334155;
     font-size: 13px;
 }
 
 /* Form Inputs & Comboboxes */
 QLineEdit, QComboBox, QSpinBox {
-    background-color: #222638;
-    border: 1px solid #363b57;
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
     border-radius: 6px;
     padding: 6px 10px;
-    color: #f8fafc;
+    color: #0f172a;
     font-size: 13px;
     min-height: 22px;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-    border: 1.5px solid #6366f1;
-    background-color: #272c40;
+    border: 1.5px solid #2563eb;
+    background-color: #ffffff;
 }
 
 /* Editable Combobox Support */
 QComboBox:editable {
-    background-color: #222638;
-    color: #f8fafc;
+    background-color: #ffffff;
+    color: #0f172a;
 }
 
 QComboBox:editable:focus {
-    border: 1.5px solid #6366f1;
-    background-color: #272c40;
+    border: 1.5px solid #2563eb;
+    background-color: #ffffff;
 }
 
 QComboBox QLineEdit {
     background-color: transparent;
-    color: #f8fafc;
+    color: #0f172a;
     border: none;
     padding: 0;
     font-size: 13px;
@@ -818,9 +803,10 @@ QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 28px;
-    border-left: 1px solid #363b57;
+    border-left: 1px solid #e2e8f0;
     border-top-right-radius: 6px;
     border-bottom-right-radius: 6px;
+    background-color: #f8fafc;
 }
 
 QComboBox::down-arrow {
@@ -828,21 +814,21 @@ QComboBox::down-arrow {
     height: 0;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
-    border-top: 6px solid #94a3b8;
+    border-top: 6px solid #64748b;
 }
 
 QComboBox::down-arrow:hover {
-    border-top-color: #6366f1;
+    border-top-color: #2563eb;
 }
 
 /* Combobox Dropdown Popups (QAbstractItemView & QListView) - Guaranteed High Visibility */
 QComboBox QAbstractItemView, QListView {
-    background-color: #1a1c2b;
-    color: #f8fafc;
-    border: 1px solid #3b4263;
+    background-color: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
     border-radius: 8px;
     padding: 4px;
-    selection-background-color: #6366f1;
+    selection-background-color: #2563eb;
     selection-color: #ffffff;
     outline: none;
 }
@@ -851,48 +837,48 @@ QComboBox QAbstractItemView::item, QListView::item {
     min-height: 28px;
     padding: 6px 10px;
     border-radius: 4px;
-    color: #f8fafc;
+    color: #0f172a;
 }
 
 QComboBox QAbstractItemView::item:hover, QListView::item:hover {
-    background-color: #2b3047;
-    color: #ffffff;
+    background-color: #eff6ff;
+    color: #1e40af;
 }
 
 QComboBox QAbstractItemView::item:selected, QListView::item:selected {
-    background-color: #6366f1;
+    background-color: #2563eb;
     color: #ffffff;
 }
 
 /* Action Buttons */
 QPushButton {
-    background-color: #222638;
-    border: 1px solid #363b57;
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
     border-radius: 6px;
     padding: 7px 14px;
-    color: #cbd5e1;
+    color: #334155;
     font-weight: 500;
 }
 
 QPushButton:hover {
-    background-color: #2c324a;
-    border-color: #4b5275;
-    color: #f8fafc;
+    background-color: #f8fafc;
+    border-color: #94a3b8;
+    color: #0f172a;
 }
 
 QPushButton:pressed {
-    background-color: #1a1e2e;
+    background-color: #f1f5f9;
 }
 
 QPushButton:disabled {
-    background-color: #181a26;
-    border-color: #25283b;
-    color: #64748b;
+    background-color: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #94a3b8;
 }
 
 QPushButton#testBtn {
-    background-color: #6366f1;
-    border: 1px solid #6366f1;
+    background-color: #2563eb;
+    border: 1px solid #2563eb;
     color: #ffffff;
     font-weight: bold;
     font-size: 13px;
@@ -900,93 +886,94 @@ QPushButton#testBtn {
 }
 
 QPushButton#testBtn:hover {
-    background-color: #4f46e5;
-    border-color: #4f46e5;
+    background-color: #1d4ed8;
+    border-color: #1d4ed8;
 }
 
 QPushButton#testBtn:disabled {
-    background-color: #312e81;
-    border-color: #312e81;
-    color: #94a3b8;
+    background-color: #94a3b8;
+    border-color: #94a3b8;
+    color: #f8fafc;
 }
 
 /* Text Editors */
 QTextEdit {
-    background-color: #161824;
-    border: 1px solid #2d3148;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 6px;
-    color: #f8fafc;
+    color: #0f172a;
     padding: 10px;
-    font-size: 12px;
+    font-size: 13px;
 }
 
 /* Tabs & Tab Bars */
 QTabWidget::pane {
-    border: 1px solid #2d3148;
+    border: 1px solid #e2e8f0;
     border-radius: 6px;
-    background-color: #1a1c2b;
+    background-color: #ffffff;
 }
 
 QTabBar::tab {
-    background-color: #161824;
-    color: #94a3b8;
-    border: 1px solid #2d3148;
+    background-color: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
     border-bottom: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
     padding: 8px 16px;
     margin-right: 2px;
+    font-weight: 500;
 }
 
 QTabBar::tab:selected {
-    background-color: #1a1c2b;
-    color: #f8fafc;
+    background-color: #ffffff;
+    color: #2563eb;
     font-weight: bold;
-    border-bottom: 2px solid #6366f1;
+    border-bottom: 2px solid #2563eb;
 }
 
 QTabBar::tab:hover:!selected {
-    background-color: #222638;
-    color: #cbd5e1;
+    background-color: #f8fafc;
+    color: #0f172a;
 }
 
 /* Tables */
 QTableWidget {
-    background-color: #161824;
-    border: 1px solid #2d3148;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 6px;
-    color: #f8fafc;
-    gridline-color: #2d3148;
+    color: #0f172a;
+    gridline-color: #f1f5f9;
 }
 
 QTableWidget QHeaderView::section {
-    background-color: #1a1c2b;
-    color: #94a3b8;
+    background-color: #f8fafc;
+    color: #475569;
     padding: 6px;
-    border: 1px solid #2d3148;
+    border: 1px solid #e2e8f0;
     font-weight: bold;
 }
 
 QTableWidget::item:selected {
-    background-color: #6366f1;
-    color: #ffffff;
+    background-color: #eff6ff;
+    color: #1e40af;
 }
 
 /* Scrollbars */
 QScrollBar:vertical {
-    background-color: #161824;
+    background-color: #f8fafc;
     width: 8px;
     margin: 0px;
 }
 
 QScrollBar::handle:vertical {
-    background-color: #363b57;
+    background-color: #cbd5e1;
     min-height: 20px;
     border-radius: 4px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background-color: #6366f1;
+    background-color: #94a3b8;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
@@ -1070,9 +1057,9 @@ def run_pyside6_gui():
             header_layout = QHBoxLayout()
             title_vbox = QVBoxLayout()
             title_lbl = QLabel("API Connection Tester")
-            title_lbl.setStyleSheet("font-size: 20px; font-weight: bold; color: #818cf8;")
+            title_lbl.setStyleSheet("font-size: 21px; font-weight: bold; color: #1e40af;")
             subtitle_lbl = QLabel("Test Base URL, API Key, and Model connectivity in real time")
-            subtitle_lbl.setStyleSheet("font-size: 12px; color: #94a3b8;")
+            subtitle_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
             title_vbox.addWidget(title_lbl)
             title_vbox.addWidget(subtitle_lbl)
             header_layout.addLayout(title_vbox)
@@ -1080,8 +1067,8 @@ def run_pyside6_gui():
 
             self.badge_lbl = QLabel("READY")
             self.badge_lbl.setStyleSheet(
-                "background-color: #272c40; color: #94a3b8; font-weight: bold; "
-                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
+                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
             )
             header_layout.addWidget(self.badge_lbl)
             main_layout.addLayout(header_layout)
@@ -1192,7 +1179,7 @@ def run_pyside6_gui():
 
             self.progress_bar = QProgressBar()
             self.progress_bar.setRange(0, 0)
-            self.progress_bar.setFixedHeight(6)
+            self.progress_bar.setFixedHeight(5)
             self.progress_bar.hide()
             main_layout.addWidget(self.progress_bar)
 
@@ -1213,7 +1200,7 @@ def run_pyside6_gui():
             # Tab 1: Overview
             tab_overview = QWidget()
             tab_over_layout = QVBoxLayout(tab_overview)
-            tab_over_layout.setContentsMargins(10, 10, 10, 10)
+            tab_over_layout.setContentsMargins(12, 12, 12, 12)
 
             meta_grid = QGridLayout()
             meta_grid.addWidget(QLabel("<b>Status:</b>"), 0, 0)
@@ -1246,7 +1233,7 @@ def run_pyside6_gui():
             # Tab 2: Raw Response & Headers
             tab_raw = QWidget()
             tab_raw_layout = QVBoxLayout(tab_raw)
-            tab_raw_layout.setContentsMargins(10, 10, 10, 10)
+            tab_raw_layout.setContentsMargins(12, 12, 12, 12)
             self.raw_text = QTextEdit()
             self.raw_text.setReadOnly(True)
             self.raw_text.setFont(QFont("Consolas", 10))
@@ -1256,7 +1243,7 @@ def run_pyside6_gui():
             # Tab 3: History
             tab_hist = QWidget()
             tab_hist_layout = QVBoxLayout(tab_hist)
-            tab_hist_layout.setContentsMargins(10, 10, 10, 10)
+            tab_hist_layout.setContentsMargins(12, 12, 12, 12)
             self.history_table = QTableWidget(0, 5)
             self.history_table.setHorizontalHeaderLabels(["Time", "Model", "Result", "HTTP Code", "Latency"])
             self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -1275,25 +1262,25 @@ def run_pyside6_gui():
         def set_banner_idle(self):
             self.status_banner.setText("Ready to test. Enter connection details and click 'TEST API'.")
             self.status_banner.setStyleSheet(
-                "background-color: #1e2235; color: #94a3b8; border: 1px solid #2d3148; "
+                "background-color: #f8fafc; color: #475569; border: 1px solid #cbd5e1; "
                 "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("READY")
             self.badge_lbl.setStyleSheet(
-                "background-color: #272c40; color: #94a3b8; font-weight: bold; "
-                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
+                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_testing(self, target: str):
             self.status_banner.setText(f"⏳ Testing connection to: {target} ...")
             self.status_banner.setStyleSheet(
-                "background-color: #1e293b; color: #60a5fa; border: 1px solid #3b82f6; "
+                "background-color: #eff6ff; color: #1e40af; border: 1px solid #93c5fd; "
                 "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("TESTING...")
             self.badge_lbl.setStyleSheet(
-                "background-color: #1d4ed8; color: #ffffff; font-weight: bold; "
-                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
+                "background-color: #bfdbfe; color: #1e3a8a; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_success(self, res: ApiTestResult):
@@ -1301,13 +1288,13 @@ def run_pyside6_gui():
                 f"✔ WORKING! (HTTP {res.status_code}) — Response time: {res.latency_ms:.1f} ms"
             )
             self.status_banner.setStyleSheet(
-                "background-color: #14532d; color: #bbf7d0; border: 1px solid #22c55e; "
+                "background-color: #f0fdf4; color: #166534; border: 1px solid #86efac; "
                 "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("WORKING")
             self.badge_lbl.setStyleSheet(
-                "background-color: #16a34a; color: #ffffff; font-weight: bold; "
-                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
+                "background-color: #22c55e; color: #ffffff; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def set_banner_failure(self, res: ApiTestResult):
@@ -1316,13 +1303,13 @@ def run_pyside6_gui():
                 f"✖ NOT WORKING — {status_desc}: {res.status_message}"
             )
             self.status_banner.setStyleSheet(
-                "background-color: #450a0a; color: #fecaca; border: 1px solid #ef4444; "
+                "background-color: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; "
                 "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
             )
             self.badge_lbl.setText("FAILED")
             self.badge_lbl.setStyleSheet(
-                "background-color: #dc2626; color: #ffffff; font-weight: bold; "
-                "padding: 4px 14px; border-radius: 12px; font-size: 11px;"
+                "background-color: #ef4444; color: #ffffff; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
             )
 
         def populate_presets(self):
@@ -1564,7 +1551,6 @@ def run_pyside6_gui():
                 QMessageBox.information(self, "Saved", msg)
                 self.providers = load_providers_json()
                 self.populate_presets()
-                # Select the saved provider
                 for i in range(self.provider_combo.count()):
                     if self.provider_combo.itemData(i) == current_prov:
                         self.provider_combo.setCurrentIndex(i)
@@ -1606,6 +1592,7 @@ def run_tkinter_gui():
             self.title("Key Switcher - API Connection Tester (Standard GUI)")
             self.geometry("740, 640")
             self.minsize(600, 480)
+            self.configure(bg="#f8fafc")
 
             self.providers = load_providers_json()
             self.saved_keys = load_keys_from_excel()
@@ -1622,9 +1609,9 @@ def run_tkinter_gui():
             # Header
             header_frame = ttk.Frame(main_frame)
             header_frame.pack(fill=tk.X, pady=(0, 10))
-            ttk.Label(header_frame, text="API Connection Tester", font=("Segoe UI", 16, "bold")).pack(side=tk.LEFT)
+            ttk.Label(header_frame, text="API Connection Tester", font=("Segoe UI", 16, "bold"), foreground="#1e40af").pack(side=tk.LEFT)
             self.badge_var = tk.StringVar(value="READY")
-            self.badge_lbl = tk.Label(header_frame, textvariable=self.badge_var, bg="#e2e8f0", fg="#475569", font=("Segoe UI", 9, "bold"), padx=8, pady=2)
+            self.badge_lbl = tk.Label(header_frame, textvariable=self.badge_var, bg="#e2e8f0", fg="#475569", font=("Segoe UI", 9, "bold"), padx=10, pady=3)
             self.badge_lbl.pack(side=tk.RIGHT)
 
             # Presets Frame
@@ -1689,7 +1676,7 @@ def run_tkinter_gui():
 
             # Status Banner
             self.banner_var = tk.StringVar(value="Ready to test. Enter connection details and click 'TEST API'.")
-            self.banner_lbl = tk.Label(main_frame, textvariable=self.banner_var, bg="#f1f5f9", fg="#475569", font=("Segoe UI", 10, "bold"), relief="solid", bd=1, padx=8, pady=8)
+            self.banner_lbl = tk.Label(main_frame, textvariable=self.banner_var, bg="#f8fafc", fg="#475569", font=("Segoe UI", 10, "bold"), relief="solid", bd=1, padx=10, pady=8)
             self.banner_lbl.pack(fill=tk.X, pady=(0, 8))
 
             # Notebook Tabs
@@ -1700,13 +1687,13 @@ def run_tkinter_gui():
             tab_out = ttk.Frame(notebook, padding=6)
             notebook.add(tab_out, text="Overview & Response")
 
-            self.out_text = tk.Text(tab_out, wrap="word", height=12, font=("Segoe UI", 10))
+            self.out_text = tk.Text(tab_out, wrap="word", height=12, font=("Segoe UI", 10), bg="#ffffff", fg="#0f172a")
             self.out_text.pack(fill=tk.BOTH, expand=True)
 
             # Tab 2: Raw
             tab_raw = ttk.Frame(notebook, padding=6)
             notebook.add(tab_raw, text="Raw Response")
-            self.raw_text = tk.Text(tab_raw, wrap="none", height=12, font=("Consolas", 9))
+            self.raw_text = tk.Text(tab_raw, wrap="none", height=12, font=("Consolas", 9), bg="#ffffff", fg="#0f172a")
             self.raw_text.pack(fill=tk.BOTH, expand=True)
 
         def populate_presets(self):
@@ -1817,12 +1804,12 @@ def run_tkinter_gui():
 
             if res.is_working:
                 self.banner_var.set(f"✔ WORKING! (HTTP {res.status_code}) — {res.latency_ms:.1f} ms")
-                self.banner_lbl.config(bg="#dcfce7", fg="#14532d")
+                self.banner_lbl.config(bg="#f0fdf4", fg="#166534")
                 self.badge_var.set("WORKING")
                 self.badge_lbl.config(bg="#22c55e", fg="white")
             else:
                 self.banner_var.set(f"✖ NOT WORKING — HTTP {res.status_code}: {res.status_message}")
-                self.banner_lbl.config(bg="#fee2e2", fg="#7f1d1d")
+                self.banner_lbl.config(bg="#fef2f2", fg="#991b1b")
                 self.badge_var.set("FAILED")
                 self.badge_lbl.config(bg="#ef4444", fg="white")
 
@@ -1886,7 +1873,928 @@ def run_tkinter_gui():
 
         def clear_results(self):
             self.banner_var.set("Ready to test. Enter connection details and click 'TEST API'.")
-            self.banner_lbl.config(bg="#f1f5f9", fg="#475569")
+            self.banner_lbl.config(bg="#f8fafc", fg="#475569")
+            self.badge_var.set("READY")
+            self.badge_lbl.config(bg="#e2e8f0", fg="#475569")
+            self.out_text.delete("1.0", tk.END)
+            self.raw_text.delete("1.0", tk.END)
+            self.copy_btn.config(state="disabled")
+
+    app = TkinterApiTester()
+    app.mainloop()
+
+
+# =============================================================================
+# CLI / ENTRY POINT
+# =============================================================================
+
+def main():
+    """Tries PySide6 first; if unavailable, seamlessly launches Tkinter GUI."""
+    try:
+        import PySide6
+        run_pyside6_gui()
+    except ImportError:
+        print("[Notice] PySide6 not found in this Python environment. Launching standard Tkinter GUI...")
+        run_tkinter_gui()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+# =============================================================================
+# PYSIDE6 IMPLEMENTATION (Primary GUI)
+# =============================================================================
+
+def run_pyside6_gui():
+    from PySide6.QtCore import Qt, QThread, Signal
+    from PySide6.QtWidgets import (
+        QApplication,
+        QMainWindow,
+        QWidget,
+        QVBoxLayout,
+        QHBoxLayout,
+        QFormLayout,
+        QGridLayout,
+        QLabel,
+        QLineEdit,
+        QComboBox,
+        QPushButton,
+        QTextEdit,
+        QTabWidget,
+        QProgressBar,
+        QGroupBox,
+        QCheckBox,
+        QSpinBox,
+        QTableWidget,
+        QTableWidgetItem,
+        QHeaderView,
+        QMessageBox,
+        QInputDialog,
+        QListView,
+    )
+    from PySide6.QtGui import QFont, QColor
+
+    class ApiWorkerThread(QThread):
+        """Worker thread for non-blocking HTTP verification."""
+        test_finished = Signal(object)
+
+        def __init__(self, kwargs):
+            super().__init__()
+            self.kwargs = kwargs
+
+        def run(self):
+            result = run_api_test(**self.kwargs)
+            self.test_finished.emit(result)
+
+    class ApiTesterWindow(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            self.providers = load_providers_json()
+            self.saved_keys = load_keys_from_excel()
+            self.worker_thread: Optional[ApiWorkerThread] = None
+            self.last_result: Optional[ApiTestResult] = None
+            self.history: List[Tuple[str, str, str, str, str, str]] = []
+
+            self.setWindowTitle("Key Switcher - API Connection Tester")
+            self.resize(780, 660)
+            self.setMinimumSize(640, 480)
+
+            self.setup_ui()
+            self.apply_theme()
+            self.populate_presets()
+
+        def setup_ui(self):
+            central = QWidget()
+            self.setCentralWidget(central)
+            main_layout = QVBoxLayout(central)
+            main_layout.setContentsMargins(18, 16, 18, 16)
+            main_layout.setSpacing(12)
+
+            # -----------------------------------------------------------------
+            # 1. Header
+            # -----------------------------------------------------------------
+            header_layout = QHBoxLayout()
+            title_vbox = QVBoxLayout()
+            title_lbl = QLabel("API Connection Tester")
+            title_lbl.setStyleSheet("font-size: 21px; font-weight: bold; color: #1e40af;")
+            subtitle_lbl = QLabel("Test Base URL, API Key, and Model connectivity in real time")
+            subtitle_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
+            title_vbox.addWidget(title_lbl)
+            title_vbox.addWidget(subtitle_lbl)
+            header_layout.addLayout(title_vbox)
+            header_layout.addStretch()
+
+            self.badge_lbl = QLabel("READY")
+            self.badge_lbl.setStyleSheet(
+                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
+            )
+            header_layout.addWidget(self.badge_lbl)
+            main_layout.addLayout(header_layout)
+
+            # -----------------------------------------------------------------
+            # 2. Presets Group (Quick Load)
+            # -----------------------------------------------------------------
+            preset_group = QGroupBox("Presets & Auto-Fill")
+            preset_layout = QGridLayout(preset_group)
+            preset_layout.setContentsMargins(14, 12, 14, 12)
+            preset_layout.setSpacing(10)
+
+            preset_layout.addWidget(QLabel("Provider Preset:"), 0, 0)
+            self.provider_combo = QComboBox()
+            self.provider_combo.setView(QListView())
+            self.provider_combo.setMaxVisibleItems(12)
+            self.provider_combo.currentIndexChanged.connect(self.on_provider_selected)
+            preset_layout.addWidget(self.provider_combo, 0, 1)
+
+            preset_layout.addWidget(QLabel("Saved Key (keys.xlsx):"), 0, 2)
+            self.saved_key_combo = QComboBox()
+            self.saved_key_combo.setView(QListView())
+            self.saved_key_combo.setMaxVisibleItems(12)
+            self.saved_key_combo.currentIndexChanged.connect(self.on_saved_key_selected)
+            preset_layout.addWidget(self.saved_key_combo, 0, 3)
+
+            main_layout.addWidget(preset_group)
+
+            # -----------------------------------------------------------------
+            # 3. Connection Configuration Form
+            # -----------------------------------------------------------------
+            form_group = QGroupBox("API Configuration")
+            form_layout = QFormLayout(form_group)
+            form_layout.setContentsMargins(14, 12, 14, 12)
+            form_layout.setSpacing(10)
+
+            # Base URL
+            self.url_edit = QLineEdit()
+            self.url_edit.setPlaceholderText("e.g. https://openrouter.ai/api/v1 or https://api.groq.com/openai/v1")
+            form_layout.addRow("Base URL *:", self.url_edit)
+
+            # API Key
+            key_layout = QHBoxLayout()
+            self.key_edit = QLineEdit()
+            self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+            self.key_edit.setPlaceholderText("Enter API Key (optional for local Ollama)")
+            self.toggle_key_btn = QPushButton("👁 Show")
+            self.toggle_key_btn.setFixedWidth(74)
+            self.toggle_key_btn.clicked.connect(self.toggle_key_visibility)
+            key_layout.addWidget(self.key_edit)
+            key_layout.addWidget(self.toggle_key_btn)
+            form_layout.addRow("API Key:", key_layout)
+
+            # Model (Editable combo box)
+            self.model_combo = QComboBox()
+            self.model_combo.setEditable(True)
+            self.model_combo.setView(QListView())
+            self.model_combo.setMaxVisibleItems(12)
+            self.model_combo.setPlaceholderText("e.g. openai/gpt-oss-120b or llama-3.3-70b-versatile")
+            form_layout.addRow("Model *:", self.model_combo)
+
+            # Protocol
+            self.protocol_combo = QComboBox()
+            self.protocol_combo.setView(QListView())
+            self.protocol_combo.setMaxVisibleItems(12)
+            self.protocol_combo.addItem("Auto-Detect (OpenAI & Anthropic)", "auto")
+            self.protocol_combo.addItem("OpenAI Compatible (/chat/completions)", "openai")
+            self.protocol_combo.addItem("Anthropic Compatible (/messages)", "anthropic")
+            self.protocol_combo.addItem("Direct Endpoint URL (Use exact Base URL)", "direct")
+            form_layout.addRow("Protocol:", self.protocol_combo)
+
+            main_layout.addWidget(form_group)
+
+            # -----------------------------------------------------------------
+            # 4. Action Buttons & Progress
+            # -----------------------------------------------------------------
+            btn_layout = QHBoxLayout()
+            self.test_btn = QPushButton("🚀 TEST API")
+            self.test_btn.setObjectName("testBtn")
+            self.test_btn.setMinimumHeight(40)
+            self.test_btn.clicked.connect(self.start_test)
+            btn_layout.addWidget(self.test_btn)
+
+            self.cancel_btn = QPushButton("Cancel")
+            self.cancel_btn.setMinimumHeight(40)
+            self.cancel_btn.setEnabled(False)
+            self.cancel_btn.clicked.connect(self.cancel_test)
+            btn_layout.addWidget(self.cancel_btn)
+
+            self.copy_btn = QPushButton("📋 Copy Report")
+            self.copy_btn.setMinimumHeight(40)
+            self.copy_btn.setEnabled(False)
+            self.copy_btn.clicked.connect(self.copy_report)
+            btn_layout.addWidget(self.copy_btn)
+
+            self.save_btn = QPushButton("💾 Save Preset")
+            self.save_btn.setMinimumHeight(40)
+            self.save_btn.setToolTip("Save this Base URL and Model to providers.json")
+            self.save_btn.clicked.connect(self.save_to_providers)
+            btn_layout.addWidget(self.save_btn)
+
+            self.clear_btn = QPushButton("Clear")
+            self.clear_btn.setMinimumHeight(40)
+            self.clear_btn.clicked.connect(self.clear_results)
+            btn_layout.addWidget(self.clear_btn)
+
+            main_layout.addLayout(btn_layout)
+
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setFixedHeight(5)
+            self.progress_bar.hide()
+            main_layout.addWidget(self.progress_bar)
+
+            # -----------------------------------------------------------------
+            # 5. Status Banner (Prominent Working/Failed Card)
+            # -----------------------------------------------------------------
+            self.status_banner = QLabel("Ready to test. Enter connection details and click 'TEST API'.")
+            self.status_banner.setWordWrap(True)
+            self.status_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.set_banner_idle()
+            main_layout.addWidget(self.status_banner)
+
+            # -----------------------------------------------------------------
+            # 6. Results Tabs
+            # -----------------------------------------------------------------
+            self.tabs = QTabWidget()
+
+            # Tab 1: Overview
+            tab_overview = QWidget()
+            tab_over_layout = QVBoxLayout(tab_overview)
+            tab_over_layout.setContentsMargins(12, 12, 12, 12)
+
+            meta_grid = QGridLayout()
+            meta_grid.addWidget(QLabel("<b>Status:</b>"), 0, 0)
+            self.meta_status = QLabel("-")
+            meta_grid.addWidget(self.meta_status, 0, 1)
+
+            meta_grid.addWidget(QLabel("<b>Latency:</b>"), 0, 2)
+            self.meta_latency = QLabel("-")
+            meta_grid.addWidget(self.meta_latency, 0, 3)
+
+            meta_grid.addWidget(QLabel("<b>Endpoint:</b>"), 1, 0)
+            self.meta_endpoint = QLabel("-")
+            self.meta_endpoint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            meta_grid.addWidget(self.meta_endpoint, 1, 1)
+
+            meta_grid.addWidget(QLabel("<b>Tokens:</b>"), 1, 2)
+            self.meta_tokens = QLabel("-")
+            meta_grid.addWidget(self.meta_tokens, 1, 3)
+
+            tab_over_layout.addLayout(meta_grid)
+
+            tab_over_layout.addWidget(QLabel("<b>Model Response / Diagnosis:</b>"))
+            self.response_text = QTextEdit()
+            self.response_text.setReadOnly(True)
+            self.response_text.setPlaceholderText("Model output or error diagnosis will appear here...")
+            tab_over_layout.addWidget(self.response_text)
+
+            self.tabs.addTab(tab_overview, "Overview")
+
+            # Tab 2: Raw Response & Headers
+            tab_raw = QWidget()
+            tab_raw_layout = QVBoxLayout(tab_raw)
+            tab_raw_layout.setContentsMargins(12, 12, 12, 12)
+            self.raw_text = QTextEdit()
+            self.raw_text.setReadOnly(True)
+            self.raw_text.setFont(QFont("Consolas", 10))
+            tab_raw_layout.addWidget(self.raw_text)
+            self.tabs.addTab(tab_raw, "Raw Response")
+
+            # Tab 3: History
+            tab_hist = QWidget()
+            tab_hist_layout = QVBoxLayout(tab_hist)
+            tab_hist_layout.setContentsMargins(12, 12, 12, 12)
+            self.history_table = QTableWidget(0, 5)
+            self.history_table.setHorizontalHeaderLabels(["Time", "Model", "Result", "HTTP Code", "Latency"])
+            self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            tab_hist_layout.addWidget(self.history_table)
+            self.tabs.addTab(tab_hist, "History")
+
+            main_layout.addWidget(self.tabs)
+
+        def apply_theme(self):
+            app_inst = QApplication.instance()
+            if app_inst:
+                app_inst.setStyleSheet(API_TESTER_STYLESHEET)
+            else:
+                self.setStyleSheet(API_TESTER_STYLESHEET)
+
+        def set_banner_idle(self):
+            self.status_banner.setText("Ready to test. Enter connection details and click 'TEST API'.")
+            self.status_banner.setStyleSheet(
+                "background-color: #f8fafc; color: #475569; border: 1px solid #cbd5e1; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
+            )
+            self.badge_lbl.setText("READY")
+            self.badge_lbl.setStyleSheet(
+                "background-color: #e2e8f0; color: #475569; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
+            )
+
+        def set_banner_testing(self, target: str):
+            self.status_banner.setText(f"⏳ Testing connection to: {target} ...")
+            self.status_banner.setStyleSheet(
+                "background-color: #eff6ff; color: #1e40af; border: 1px solid #93c5fd; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
+            )
+            self.badge_lbl.setText("TESTING...")
+            self.badge_lbl.setStyleSheet(
+                "background-color: #bfdbfe; color: #1e3a8a; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
+            )
+
+        def set_banner_success(self, res: ApiTestResult):
+            self.status_banner.setText(
+                f"✔ WORKING! (HTTP {res.status_code}) — Response time: {res.latency_ms:.1f} ms"
+            )
+            self.status_banner.setStyleSheet(
+                "background-color: #f0fdf4; color: #166534; border: 1px solid #86efac; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
+            )
+            self.badge_lbl.setText("WORKING")
+            self.badge_lbl.setStyleSheet(
+                "background-color: #22c55e; color: #ffffff; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
+            )
+
+        def set_banner_failure(self, res: ApiTestResult):
+            status_desc = f"HTTP {res.status_code}" if res.status_code else "Connection Error"
+            self.status_banner.setText(
+                f"✖ NOT WORKING — {status_desc}: {res.status_message}"
+            )
+            self.status_banner.setStyleSheet(
+                "background-color: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; "
+                "border-radius: 8px; padding: 12px; font-size: 13px; font-weight: bold;"
+            )
+            self.badge_lbl.setText("FAILED")
+            self.badge_lbl.setStyleSheet(
+                "background-color: #ef4444; color: #ffffff; font-weight: bold; "
+                "padding: 5px 14px; border-radius: 12px; font-size: 11px;"
+            )
+
+        def populate_presets(self):
+            # 1. Populate Provider Presets
+            self.provider_combo.blockSignals(True)
+            self.provider_combo.addItem("Select a Preset / Provider...", "")
+            for prov_name in self.providers.keys():
+                self.provider_combo.addItem(prov_name, prov_name)
+            self.provider_combo.addItem("Custom", "Custom")
+            self.provider_combo.blockSignals(False)
+
+            # 2. Populate Saved Keys from keys.xlsx
+            self.saved_key_combo.blockSignals(True)
+            self.saved_key_combo.addItem("Select from keys.xlsx...", "")
+            if self.saved_keys:
+                for nick, data in self.saved_keys.items():
+                    prov = data.get("provider", "")
+                    display = f"{nick} ({prov})" if prov else nick
+                    self.saved_key_combo.addItem(display, nick)
+            else:
+                self.saved_key_combo.addItem("(No saved keys found)", "")
+            self.saved_key_combo.blockSignals(False)
+
+        def on_provider_selected(self, index: int):
+            prov_name = self.provider_combo.currentData()
+            if not prov_name or prov_name == "Custom":
+                return
+            prov_info = self.providers.get(prov_name, {})
+            base_url = prov_info.get("base_url", "")
+            models = prov_info.get("models", [])
+
+            self.url_edit.setText(base_url)
+            self.model_combo.clear()
+            for m in models:
+                self.model_combo.addItem(m)
+            if models:
+                self.model_combo.setCurrentIndex(0)
+
+            # Auto-match saved key if one exists for this provider
+            for nick, data in self.saved_keys.items():
+                if data.get("provider", "").strip().lower() == prov_name.strip().lower():
+                    for i in range(self.saved_key_combo.count()):
+                        if self.saved_key_combo.itemData(i) == nick:
+                            self.saved_key_combo.blockSignals(True)
+                            self.saved_key_combo.setCurrentIndex(i)
+                            self.saved_key_combo.blockSignals(False)
+                            k = data.get("key", "").strip()
+                            if k.lower().startswith("bearer "):
+                                k = k[7:].strip()
+                            self.key_edit.setText(k)
+                            break
+                    break
+
+        def on_saved_key_selected(self, index: int):
+            nick = self.saved_key_combo.currentData()
+            if not nick or nick not in self.saved_keys:
+                return
+            key_info = self.saved_keys[nick]
+            api_key = key_info.get("key", "").strip()
+            if api_key.lower().startswith("bearer "):
+                api_key = api_key[7:].strip()
+            prov_name = key_info.get("provider", "").strip()
+
+            self.key_edit.setText(api_key)
+
+            # Match provider case-insensitively
+            matched_prov = None
+            for p_name in self.providers.keys():
+                if p_name.strip().lower() == prov_name.lower():
+                    matched_prov = p_name
+                    break
+
+            if matched_prov:
+                for i in range(self.provider_combo.count()):
+                    if str(self.provider_combo.itemData(i)).lower() == matched_prov.lower():
+                        self.provider_combo.blockSignals(True)
+                        self.provider_combo.setCurrentIndex(i)
+                        self.provider_combo.blockSignals(False)
+                        break
+
+                prov_info = self.providers.get(matched_prov, {})
+                base_url = prov_info.get("base_url", "")
+                models = prov_info.get("models", [])
+
+                if base_url:
+                    self.url_edit.setText(base_url)
+
+                self.model_combo.clear()
+                for m in models:
+                    self.model_combo.addItem(m)
+                if models:
+                    self.model_combo.setCurrentIndex(0)
+
+        def toggle_key_visibility(self):
+            if self.key_edit.echoMode() == QLineEdit.EchoMode.Password:
+                self.key_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                self.toggle_key_btn.setText("🔒 Hide")
+            else:
+                self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                self.toggle_key_btn.setText("👁 Show")
+
+        def start_test(self):
+            base_url = self.url_edit.text().strip()
+            model = self.model_combo.currentText().strip()
+            api_key = self.key_edit.text().strip()
+            protocol = self.protocol_combo.currentData() or "auto"
+            prompt = DEFAULT_PROMPT
+            max_tokens = DEFAULT_MAX_TOKENS
+            timeout = DEFAULT_TIMEOUT
+            verify_ssl = True
+
+            if not base_url:
+                QMessageBox.warning(self, "Missing URL", "Please enter a Base URL.")
+                self.url_edit.setFocus()
+                return
+            if not model:
+                QMessageBox.warning(self, "Missing Model", "Please enter or select a Model name.")
+                self.model_combo.setFocus()
+                return
+
+            self.test_btn.setEnabled(False)
+            self.cancel_btn.setEnabled(True)
+            self.copy_btn.setEnabled(False)
+            self.progress_bar.show()
+
+            self.set_banner_testing(model or base_url)
+
+            kwargs = {
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+                "protocol": protocol,
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+                "verify_ssl": verify_ssl,
+            }
+
+            self.worker_thread = ApiWorkerThread(kwargs)
+            self.worker_thread.test_finished.connect(self.on_test_finished)
+            self.worker_thread.start()
+
+        def cancel_test(self):
+            if self.worker_thread and self.worker_thread.isRunning():
+                self.worker_thread.terminate()
+                self.worker_thread.wait()
+                self.set_banner_idle()
+                self.status_banner.setText("Test cancelled by user.")
+                self.test_btn.setEnabled(True)
+                self.cancel_btn.setEnabled(False)
+                self.progress_bar.hide()
+
+        def on_test_finished(self, result: ApiTestResult):
+            self.last_result = result
+            self.test_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            self.copy_btn.setEnabled(True)
+            self.progress_bar.hide()
+
+            # 1. Update Banner
+            if result.is_working:
+                self.set_banner_success(result)
+            else:
+                self.set_banner_failure(result)
+
+            # 2. Update Overview Meta
+            status_text = f"{result.status_code} ({result.status_message})" if result.status_code else result.status_message
+            self.meta_status.setText(status_text)
+            self.meta_latency.setText(f"{result.latency_ms:.1f} ms")
+            self.meta_endpoint.setText(result.endpoint_used or "-")
+            self.meta_tokens.setText(result.token_usage or "-")
+
+            # 3. Response / Diagnosis Text Box
+            content_parts = []
+            if result.is_working:
+                content_parts.append(f"=== MODEL RESPONSE ===\n{result.model_reply}\n")
+                if result.troubleshooting:
+                    content_parts.append(f"=== NOTE ===\n{result.troubleshooting}")
+            else:
+                content_parts.append(f"=== ERROR DIAGNOSIS ===\n{result.error_details}\n")
+                if result.troubleshooting:
+                    content_parts.append(f"=== HOW TO FIX ===\n{result.troubleshooting}")
+
+            self.response_text.setPlainText("\n".join(content_parts))
+
+            # 4. Raw Response Tab
+            raw_view = [f"HTTP Status: {result.status_code} {result.status_message}"]
+            raw_view.append(f"Endpoint: {result.endpoint_used}")
+            raw_view.append(f"Protocol Style: {result.protocol}")
+            raw_view.append("\n--- Response Headers ---")
+            for hk, hv in result.response_headers.items():
+                raw_view.append(f"{hk}: {hv}")
+            raw_view.append("\n--- Response Body ---")
+            raw_view.append(result.raw_response or "(No response body)")
+            self.raw_text.setPlainText("\n".join(raw_view))
+
+            # 5. History Table
+            row_pos = self.history_table.rowCount()
+            self.history_table.insertRow(row_pos)
+            res_str = "✔ Working" if result.is_working else "✖ Failed"
+            self.history_table.setItem(row_pos, 0, QTableWidgetItem(result.timestamp.split(" ")[1]))
+            self.history_table.setItem(row_pos, 1, QTableWidgetItem(self.model_combo.currentText()))
+            self.history_table.setItem(row_pos, 2, QTableWidgetItem(res_str))
+            self.history_table.setItem(row_pos, 3, QTableWidgetItem(str(result.status_code)))
+            self.history_table.setItem(row_pos, 4, QTableWidgetItem(f"{result.latency_ms:.0f} ms"))
+
+        def copy_report(self):
+            if not self.last_result:
+                return
+            report = self.last_result.to_markdown_report(
+                base_url=self.url_edit.text(),
+                model=self.model_combo.currentText(),
+            )
+            clipboard = QApplication.clipboard()
+            clipboard.setText(report)
+            QMessageBox.information(self, "Copied", "Diagnostic report copied to clipboard!")
+
+        def save_to_providers(self):
+            base_url = self.url_edit.text().strip()
+            model = self.model_combo.currentText().strip()
+            if not base_url:
+                QMessageBox.warning(self, "Incomplete", "Please specify a Base URL.")
+                return
+            if not model:
+                QMessageBox.warning(self, "Incomplete", "Please specify a Model name.")
+                return
+
+            current_prov = self.provider_combo.currentData() or ""
+            if not current_prov or current_prov == "Custom":
+                prov_name, ok = QInputDialog.getText(
+                    self, "Provider Name", "Enter provider name for providers.json:"
+                )
+                if not ok or not prov_name.strip():
+                    return
+                current_prov = prov_name.strip()
+
+            success, msg = save_provider_to_json(current_prov, base_url, model)
+            if success:
+                QMessageBox.information(self, "Saved", msg)
+                self.providers = load_providers_json()
+                self.populate_presets()
+                for i in range(self.provider_combo.count()):
+                    if self.provider_combo.itemData(i) == current_prov:
+                        self.provider_combo.setCurrentIndex(i)
+                        break
+            else:
+                QMessageBox.critical(self, "Error", msg)
+
+        def clear_results(self):
+            self.set_banner_idle()
+            self.meta_status.setText("-")
+            self.meta_latency.setText("-")
+            self.meta_endpoint.setText("-")
+            self.meta_tokens.setText("-")
+            self.response_text.clear()
+            self.raw_text.clear()
+            self.last_result = None
+            self.copy_btn.setEnabled(False)
+
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(API_TESTER_STYLESHEET)
+    window = ApiTesterWindow()
+    window.show()
+    sys.exit(app.exec())
+
+
+# =============================================================================
+# TKINTER IMPLEMENTATION (Fallback GUI - Zero External Dependencies)
+# =============================================================================
+
+def run_tkinter_gui():
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    import threading
+
+    class TkinterApiTester(tk.Tk):
+        def __init__(self):
+            super().__init__()
+            self.title("Key Switcher - API Connection Tester (Standard GUI)")
+            self.geometry("740, 640")
+            self.minsize(600, 480)
+            self.configure(bg="#f8fafc")
+
+            self.providers = load_providers_json()
+            self.saved_keys = load_keys_from_excel()
+            self.last_result: Optional[ApiTestResult] = None
+            self.is_running = False
+
+            self.setup_ui()
+            self.populate_presets()
+
+        def setup_ui(self):
+            main_frame = ttk.Frame(self, padding=12)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Header
+            header_frame = ttk.Frame(main_frame)
+            header_frame.pack(fill=tk.X, pady=(0, 10))
+            ttk.Label(header_frame, text="API Connection Tester", font=("Segoe UI", 16, "bold"), foreground="#1e40af").pack(side=tk.LEFT)
+            self.badge_var = tk.StringVar(value="READY")
+            self.badge_lbl = tk.Label(header_frame, textvariable=self.badge_var, bg="#e2e8f0", fg="#475569", font=("Segoe UI", 9, "bold"), padx=10, pady=3)
+            self.badge_lbl.pack(side=tk.RIGHT)
+
+            # Presets Frame
+            preset_lf = ttk.LabelFrame(main_frame, text="Presets & Auto-Fill", padding=8)
+            preset_lf.pack(fill=tk.X, pady=(0, 8))
+
+            ttk.Label(preset_lf, text="Provider:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+            self.provider_var = tk.StringVar()
+            self.provider_combo = ttk.Combobox(preset_lf, textvariable=self.provider_var, state="readonly", width=22)
+            self.provider_combo.grid(row=0, column=1, sticky="w", padx=4, pady=2)
+            self.provider_combo.bind("<<ComboboxSelected>>", self.on_provider_selected)
+
+            ttk.Label(preset_lf, text="Saved Key:").grid(row=0, column=2, sticky="w", padx=(16, 4), pady=2)
+            self.key_select_var = tk.StringVar()
+            self.key_combo = ttk.Combobox(preset_lf, textvariable=self.key_select_var, state="readonly", width=26)
+            self.key_combo.grid(row=0, column=3, sticky="w", padx=4, pady=2)
+            self.key_combo.bind("<<ComboboxSelected>>", self.on_saved_key_selected)
+
+            # Config Frame
+            cfg_lf = ttk.LabelFrame(main_frame, text="API Configuration", padding=8)
+            cfg_lf.pack(fill=tk.X, pady=(0, 8))
+
+            ttk.Label(cfg_lf, text="Base URL:").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+            self.url_var = tk.StringVar()
+            self.url_entry = ttk.Entry(cfg_lf, textvariable=self.url_var, width=54)
+            self.url_entry.grid(row=0, column=1, columnspan=2, sticky="we", padx=4, pady=4)
+
+            ttk.Label(cfg_lf, text="API Key:").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+            self.key_var = tk.StringVar()
+            self.key_entry = ttk.Entry(cfg_lf, textvariable=self.key_var, show="•", width=42)
+            self.key_entry.grid(row=1, column=1, sticky="we", padx=4, pady=4)
+            self.toggle_btn = ttk.Button(cfg_lf, text="Show", width=8, command=self.toggle_key)
+            self.toggle_btn.grid(row=1, column=2, sticky="w", padx=4, pady=4)
+
+            ttk.Label(cfg_lf, text="Model:").grid(row=2, column=0, sticky="w", padx=4, pady=4)
+            self.model_var = tk.StringVar()
+            self.model_combo = ttk.Combobox(cfg_lf, textvariable=self.model_var, width=42)
+            self.model_combo.grid(row=2, column=1, sticky="we", padx=4, pady=4)
+
+            ttk.Label(cfg_lf, text="Protocol:").grid(row=3, column=0, sticky="w", padx=4, pady=4)
+            self.protocol_var = tk.StringVar(value="auto")
+            proto_combo = ttk.Combobox(cfg_lf, textvariable=self.protocol_var, values=["auto", "openai", "anthropic", "direct"], state="readonly", width=22)
+            proto_combo.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+
+            cfg_lf.columnconfigure(1, weight=1)
+
+            # Action Buttons
+            btn_frame = ttk.Frame(main_frame)
+            btn_frame.pack(fill=tk.X, pady=(0, 8))
+
+            self.test_btn = ttk.Button(btn_frame, text="🚀 TEST API", command=self.start_test)
+            self.test_btn.pack(side=tk.LEFT, padx=(0, 6), ipadx=10, ipady=4)
+
+            self.copy_btn = ttk.Button(btn_frame, text="📋 Copy Report", command=self.copy_report, state="disabled")
+            self.copy_btn.pack(side=tk.LEFT, padx=6)
+
+            self.save_btn = ttk.Button(btn_frame, text="💾 Save Preset", command=self.save_to_providers)
+            self.save_btn.pack(side=tk.LEFT, padx=6)
+
+            self.clear_btn = ttk.Button(btn_frame, text="Clear", command=self.clear_results)
+            self.clear_btn.pack(side=tk.LEFT, padx=6)
+
+            # Status Banner
+            self.banner_var = tk.StringVar(value="Ready to test. Enter connection details and click 'TEST API'.")
+            self.banner_lbl = tk.Label(main_frame, textvariable=self.banner_var, bg="#f8fafc", fg="#475569", font=("Segoe UI", 10, "bold"), relief="solid", bd=1, padx=10, pady=8)
+            self.banner_lbl.pack(fill=tk.X, pady=(0, 8))
+
+            # Notebook Tabs
+            notebook = ttk.Notebook(main_frame)
+            notebook.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 1: Output
+            tab_out = ttk.Frame(notebook, padding=6)
+            notebook.add(tab_out, text="Overview & Response")
+
+            self.out_text = tk.Text(tab_out, wrap="word", height=12, font=("Segoe UI", 10), bg="#ffffff", fg="#0f172a")
+            self.out_text.pack(fill=tk.BOTH, expand=True)
+
+            # Tab 2: Raw
+            tab_raw = ttk.Frame(notebook, padding=6)
+            notebook.add(tab_raw, text="Raw Response")
+            self.raw_text = tk.Text(tab_raw, wrap="none", height=12, font=("Consolas", 9), bg="#ffffff", fg="#0f172a")
+            self.raw_text.pack(fill=tk.BOTH, expand=True)
+
+        def populate_presets(self):
+            prov_names = ["(Select Preset)"] + list(self.providers.keys()) + ["Custom"]
+            self.provider_combo["values"] = prov_names
+            self.provider_combo.current(0)
+
+            key_names = ["(Select Saved Key)"] + [f"{k} ({v.get('provider','')})" for k, v in self.saved_keys.items()]
+            self.key_combo["values"] = key_names
+            self.key_combo.current(0)
+
+        def on_provider_selected(self, event=None):
+            sel = self.provider_var.get()
+            if not sel or sel in ("(Select Preset)", "Custom"):
+                return
+            if sel in self.providers:
+                info = self.providers[sel]
+                self.url_var.set(info.get("base_url", ""))
+                models = info.get("models", [])
+                self.model_combo["values"] = models
+                if models:
+                    self.model_var.set(models[0])
+
+            # Auto-match saved key if one exists for this provider
+            for nick, data in self.saved_keys.items():
+                if data.get("provider", "").strip().lower() == sel.strip().lower():
+                    k = data.get("key", "").strip()
+                    if k.lower().startswith("bearer "):
+                        k = k[7:].strip()
+                    self.key_var.set(k)
+                    for item in self.key_combo["values"]:
+                        if item.startswith(nick):
+                            self.key_select_var.set(item)
+                            break
+                    break
+
+        def on_saved_key_selected(self, event=None):
+            sel = self.key_select_var.get()
+            nick = sel.split(" (")[0]
+            if nick in self.saved_keys:
+                data = self.saved_keys[nick]
+                k = data.get("key", "").strip()
+                if k.lower().startswith("bearer "):
+                    k = k[7:].strip()
+                self.key_var.set(k)
+                prov = data.get("provider", "").strip()
+
+                # Case-insensitive provider match
+                matched = None
+                for p in self.providers.keys():
+                    if p.strip().lower() == prov.lower():
+                        matched = p
+                        break
+                if matched:
+                    self.provider_var.set(matched)
+                    info = self.providers[matched]
+                    self.url_var.set(info.get("base_url", ""))
+                    models = info.get("models", [])
+                    self.model_combo["values"] = models
+                    if models:
+                        self.model_var.set(models[0])
+
+        def toggle_key(self):
+            if self.key_entry.cget("show") == "":
+                self.key_entry.config(show="•")
+                self.toggle_btn.config(text="Show")
+            else:
+                self.key_entry.config(show="")
+                self.toggle_btn.config(text="Hide")
+
+        def start_test(self):
+            if self.is_running:
+                return
+            base_url = self.url_var.get().strip()
+            model = self.model_var.get().strip()
+            if not base_url:
+                messagebox.showwarning("Missing URL", "Please enter a Base URL.")
+                return
+            if not model:
+                messagebox.showwarning("Missing Model", "Please enter a Model name.")
+                return
+
+            self.is_running = True
+            self.test_btn.config(state="disabled")
+            self.banner_var.set(f"⏳ Testing connection to: {model or base_url} ...")
+            self.banner_lbl.config(bg="#eff6ff", fg="#1e40af")
+            self.badge_var.set("TESTING...")
+            self.badge_lbl.config(bg="#bfdbfe", fg="#1e3a8a")
+
+            args = {
+                "base_url": base_url,
+                "api_key": self.key_var.get().strip(),
+                "model": model,
+                "protocol": self.protocol_var.get(),
+            }
+
+            def worker():
+                res = run_api_test(**args)
+                self.after(0, self.on_test_finished, res)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def on_test_finished(self, res: ApiTestResult):
+            self.is_running = False
+            self.test_btn.config(state="normal")
+            self.copy_btn.config(state="normal")
+            self.last_result = res
+
+            if res.is_working:
+                self.banner_var.set(f"✔ WORKING! (HTTP {res.status_code}) — {res.latency_ms:.1f} ms")
+                self.banner_lbl.config(bg="#f0fdf4", fg="#166534")
+                self.badge_var.set("WORKING")
+                self.badge_lbl.config(bg="#22c55e", fg="white")
+            else:
+                self.banner_var.set(f"✖ NOT WORKING — HTTP {res.status_code}: {res.status_message}")
+                self.banner_lbl.config(bg="#fef2f2", fg="#991b1b")
+                self.badge_var.set("FAILED")
+                self.badge_lbl.config(bg="#ef4444", fg="white")
+
+            out = []
+            if res.is_working:
+                out.append(f"STATUS: WORKING (HTTP {res.status_code})")
+                out.append(f"LATENCY: {res.latency_ms:.1f} ms")
+                out.append(f"ENDPOINT: {res.endpoint_used}")
+                if res.token_usage:
+                    out.append(f"TOKENS: {res.token_usage}")
+                out.append(f"\n--- MODEL RESPONSE ---\n{res.model_reply}")
+            else:
+                out.append(f"STATUS: FAILED (HTTP {res.status_code} {res.status_message})")
+                out.append(f"ENDPOINT: {res.endpoint_used}")
+                out.append(f"ERROR: {res.error_details}")
+                if res.troubleshooting:
+                    out.append(f"\n--- HOW TO FIX ---\n{res.troubleshooting}")
+
+            self.out_text.delete("1.0", tk.END)
+            self.out_text.insert(tk.END, "\n".join(out))
+
+            self.raw_text.delete("1.0", tk.END)
+            self.raw_text.insert(tk.END, res.raw_response or "(No response)")
+
+        def copy_report(self):
+            if not self.last_result:
+                return
+            report = self.last_result.to_markdown_report(
+                base_url=self.url_var.get(),
+                model=self.model_var.get(),
+            )
+            self.clipboard_clear()
+            self.clipboard_append(report)
+            messagebox.showinfo("Copied", "Diagnostic report copied to clipboard!")
+
+        def save_to_providers(self):
+            from tkinter import simpledialog
+            base_url = self.url_var.get().strip()
+            model = self.model_var.get().strip()
+            if not base_url:
+                messagebox.showwarning("Incomplete", "Please enter a Base URL.")
+                return
+            if not model:
+                messagebox.showwarning("Incomplete", "Please enter a Model name.")
+                return
+
+            current_prov = self.provider_var.get()
+            if not current_prov or current_prov in ("(Select Preset)", "Custom"):
+                prov_name = simpledialog.askstring("Provider Name", "Enter provider name for providers.json:")
+                if not prov_name or not prov_name.strip():
+                    return
+                current_prov = prov_name.strip()
+
+            success, msg = save_provider_to_json(current_prov, base_url, model)
+            if success:
+                messagebox.showinfo("Saved", msg)
+                self.providers = load_providers_json()
+                self.populate_presets()
+            else:
+                messagebox.showerror("Error", msg)
+
+        def clear_results(self):
+            self.banner_var.set("Ready to test. Enter connection details and click 'TEST API'.")
+            self.banner_lbl.config(bg="#f8fafc", fg="#475569")
             self.badge_var.set("READY")
             self.badge_lbl.config(bg="#e2e8f0", fg="#475569")
             self.out_text.delete("1.0", tk.END)
