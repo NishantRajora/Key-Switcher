@@ -1,30 +1,20 @@
 """
 ===============================================================================
-ccgate.py — Claude Code Gateway
+ccgate.py — Claude Code Gateway (GUI & CLI)
 ===============================================================================
 A self-hosted protocol-translating reverse proxy that lets Claude Code talk to
 ANY OpenAI-compatible backend provider (OpenRouter, Groq, NVIDIA AI Studio,
 Hugging Face, Ollama, etc.).
 
-Architecture:
-    Claude Code ──► localhost:5005 ──► ccgate ──► OpenRouter / Groq / NVIDIA
-                   (Anthropic API)    translates    (OpenAI API)
-
-Usage:
-    python ccgate.py                                # Interactive CLI
-    python ccgate.py --provider groq --model openai/gpt-oss-20b
-    python ccgate.py --port 8082                    # Custom port
-    python ccgate.py setup                          # Write Claude Code config
-    python ccgate.py doctor                         # Test all providers
-
 Features:
-    • Translates Anthropic Messages API ↔ OpenAI Chat Completions API
-    • Full SSE streaming with strictly compliant real-time event translation
+    • Modern PySide6 GUI control panel with live traffic monitor
+    • Full CLI support with --provider, doctor, setup, and --cli flags
+    • Translates Anthropic Messages API <-> OpenAI Chat Completions API
+    • Full SSE streaming with real-time event translation
     • Tool call / function call bidirectional translation (stream & sync)
+    • Automatic port reclaim & cleanup (no more locked port 5005 on restart)
     • Integrates with providers.json and keys.xlsx for quick selection
-    • One-command Claude Code setup
-    • CORS support for any client
-    • Zero external dependencies (pure Python 3.10+ standard library)
+    • 1-Click Claude Code configuration (~/.claude/settings.json)
 ===============================================================================
 """
 
@@ -34,10 +24,12 @@ import json
 import time
 import uuid
 import ssl
+import socket
 import argparse
 import signal
+import atexit
 import threading
-import traceback
+import subprocess
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -61,7 +53,7 @@ if sys.platform == "win32":
 # CONSTANTS & PATHS
 # =============================================================================
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DEFAULT_PORT = 5005
 DEFAULT_HOST = "127.0.0.1"
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -85,9 +77,6 @@ class C:
     MAGENTA= "\033[95m"
     CYAN   = "\033[96m"
     WHITE  = "\033[97m"
-    BG_RED = "\033[41m"
-    BG_GRN = "\033[42m"
-    BG_BLU = "\033[44m"
 
     @staticmethod
     def disable():
@@ -96,9 +85,63 @@ class C:
                 setattr(C, attr, "")
 
 
-# Disable colors if not a real terminal
 if not sys.stdout.isatty():
     C.disable()
+
+
+# =============================================================================
+# PORT UTILITIES & CLEANUP (Solves Port 5005 Re-use on Windows)
+# =============================================================================
+
+def is_port_in_use(port: int, host: str = DEFAULT_HOST) -> bool:
+    """Check if a TCP port is currently listening."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
+
+
+def free_port_if_in_use(port: int, host: str = DEFAULT_HOST) -> bool:
+    """
+    Cleanly reclaims a port if an orphaned ccgate or Python process is still holding it.
+    1. Sends graceful /_shutdown HTTP probe
+    2. If still busy, finds and terminates the stale process on Windows
+    """
+    if not is_port_in_use(port, host):
+        return True
+
+    # 1. Try graceful shutdown probe
+    try:
+        req = urllib.request.Request(f"http://{host}:{port}/_shutdown")
+        with urllib.request.urlopen(req, timeout=1):
+            pass
+        for _ in range(5):
+            time.sleep(0.2)
+            if not is_port_in_use(port, host):
+                return True
+    except Exception:
+        pass
+
+    # 2. Terminate stale process holding port (Windows)
+    if sys.platform == "win32":
+        try:
+            cmd = f'netstat -ano -p tcp | findstr ":{port} "'
+            out = subprocess.check_output(cmd, shell=True, text=True, errors="replace")
+            current_pid = os.getpid()
+            for line in out.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and "LISTENING" in parts[3].upper():
+                    pid = int(parts[4])
+                    if pid > 0 and pid != current_pid:
+                        subprocess.call(f"taskkill /F /PID {pid}", shell=True,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(5):
+                time.sleep(0.2)
+                if not is_port_in_use(port, host):
+                    return True
+        except Exception:
+            pass
+
+    return not is_port_in_use(port, host)
 
 
 # =============================================================================
@@ -227,18 +270,15 @@ def find_key_for_provider(provider_name: str, saved_keys: Dict[str, Dict[str, st
     """Find the best matching API key for a provider name."""
     p_low = provider_name.strip().lower()
 
-    # Exact match on provider column
     for nick, data in saved_keys.items():
         if data.get("provider", "").strip().lower() == p_low:
             return data.get("key", "")
 
-    # Substring match on provider column
     for nick, data in saved_keys.items():
         prov = data.get("provider", "").strip().lower()
         if p_low in prov or prov in p_low:
             return data.get("key", "")
 
-    # Match on nickname
     for nick, data in saved_keys.items():
         n_low = nick.strip().lower()
         if p_low in n_low or n_low in p_low:
@@ -264,7 +304,7 @@ def build_chat_url(base_url: str) -> str:
 
 
 # =============================================================================
-# PROTOCOL TRANSLATION: Anthropic Request → OpenAI Request
+# PROTOCOL TRANSLATION: Anthropic Request -> OpenAI Request
 # =============================================================================
 
 def translate_messages_to_openai(messages: List[Dict]) -> List[Dict]:
@@ -309,7 +349,6 @@ def translate_messages_to_openai(messages: List[Dict]) -> List[Dict]:
             if text_parts:
                 openai_msg["content"] = "\n".join(text_parts)
             elif not tool_calls:
-                # If only thinking blocks were present, OpenAI requires non-null content
                 openai_msg["content"] = ""
             else:
                 openai_msg["content"] = None
@@ -348,11 +387,9 @@ def translate_messages_to_openai(messages: List[Dict]) -> List[Dict]:
                         url = f"data:{src.get('media_type', 'image/png')};base64,{src.get('data', '')}"
                         other_parts.append({"type": "image_url", "image_url": {"url": url}})
 
-            # Emit tool results first (OpenAI requires role 'tool' immediately following assistant tool_calls)
             for tr in tool_results:
                 result.append(tr)
 
-            # Emit remaining content as user message
             if other_parts:
                 if len(other_parts) == 1 and other_parts[0]["type"] == "text":
                     result.append({"role": "user", "content": other_parts[0]["text"]})
@@ -408,7 +445,7 @@ def build_openai_request(anthropic_body: Dict, backend_model: str) -> Dict:
     """Translate a full Anthropic Messages API request to OpenAI Chat Completions."""
     messages = []
 
-    # 1. System prompt → system message
+    # 1. System prompt -> system message
     system = anthropic_body.get("system")
     if system:
         if isinstance(system, str):
@@ -429,7 +466,6 @@ def build_openai_request(anthropic_body: Dict, backend_model: str) -> Dict:
         "messages": messages,
     }
 
-    # Transfer compatible parameters
     if "max_tokens" in anthropic_body:
         openai_req["max_tokens"] = anthropic_body["max_tokens"]
     if "temperature" in anthropic_body:
@@ -442,7 +478,6 @@ def build_openai_request(anthropic_body: Dict, backend_model: str) -> Dict:
         openai_req["stream"] = True
         openai_req["stream_options"] = {"include_usage": True}
 
-    # Tools
     tools = anthropic_body.get("tools")
     if tools:
         openai_req["tools"] = translate_tools_to_openai(tools)
@@ -454,7 +489,7 @@ def build_openai_request(anthropic_body: Dict, backend_model: str) -> Dict:
 
 
 # =============================================================================
-# PROTOCOL TRANSLATION: OpenAI Response → Anthropic Response (Non-Streaming)
+# PROTOCOL TRANSLATION: OpenAI Response -> Anthropic Response (Non-Streaming)
 # =============================================================================
 
 FINISH_REASON_MAP = {
@@ -475,10 +510,8 @@ def translate_openai_response(openai_resp: Dict, model_alias: str) -> Dict:
     message = choice.get("message", {})
     finish = choice.get("finish_reason", "stop")
 
-    # Build content blocks
     content_blocks = []
 
-    # Text / reasoning content
     text = message.get("content")
     reasoning = message.get("reasoning")
     if text:
@@ -486,7 +519,6 @@ def translate_openai_response(openai_resp: Dict, model_alias: str) -> Dict:
     elif reasoning:
         content_blocks.append({"type": "text", "text": reasoning})
 
-    # Tool calls
     tool_calls = message.get("tool_calls", [])
     for tc in tool_calls:
         func = tc.get("function", {})
@@ -513,7 +545,6 @@ def translate_openai_response(openai_resp: Dict, model_alias: str) -> Dict:
     if not content_blocks:
         content_blocks.append({"type": "text", "text": ""})
 
-    # Usage
     usage_in = openai_resp.get("usage", {})
     usage = {
         "input_tokens": usage_in.get("prompt_tokens", 0),
@@ -533,7 +564,7 @@ def translate_openai_response(openai_resp: Dict, model_alias: str) -> Dict:
 
 
 # =============================================================================
-# PROTOCOL TRANSLATION: OpenAI SSE → Anthropic SSE (Streaming)
+# PROTOCOL TRANSLATION: OpenAI SSE -> Anthropic SSE (Streaming)
 # =============================================================================
 
 class StreamTranslator:
@@ -549,12 +580,10 @@ class StreamTranslator:
         self.started = False
         self._finished = False
 
-        # Current open content block tracking (Anthropic requires strict 1-block-at-a-time)
-        self.current_block_type: Optional[str] = None  # "text" or "tool_use"
+        self.current_block_type: Optional[str] = None
         self.current_block_index: int = -1
         self.next_block_index: int = 0
 
-        # Tool tracking: openai tc_index → state
         self.tool_blocks: Dict[int, Dict] = {}
 
         self.input_tokens = 0
@@ -564,7 +593,7 @@ class StreamTranslator:
         self.last_usage: Optional[Dict] = None
 
     def _write_event(self, event: str, data: Any) -> bool:
-        """Write a single SSE event to the response stream. Returns False on client disconnect."""
+        """Write a single SSE event to the response stream."""
         try:
             payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
             self.wfile.write(payload.encode("utf-8"))
@@ -635,7 +664,6 @@ class StreamTranslator:
         name = func.get("name", "")
 
         if tc_index not in self.tool_blocks:
-            # Starting a new tool call — close whatever block was open
             self._close_current_block()
 
             block_idx = self.next_block_index
@@ -668,11 +696,9 @@ class StreamTranslator:
                     "delta": {"type": "input_json_delta", "partial_json": args},
                 })
         else:
-            # Continuation of existing tool call
             state = self.tool_blocks[tc_index]
             block_idx = state["block_index"]
 
-            # If current active block isn't this tool, switch back
             if self.current_block_index != block_idx:
                 self._close_current_block()
                 self.current_block_type = "tool_use"
@@ -697,13 +723,11 @@ class StreamTranslator:
 
         self._close_current_block()
 
-        # Token counts
         u = usage_data or self.last_usage
         if u:
             self.output_tokens = u.get("completion_tokens", 0)
             self.input_tokens = u.get("prompt_tokens", self.input_tokens)
 
-        # Fallback estimation if backend didn't supply token counts
         if self.output_tokens == 0:
             total_chars = sum(len(t) for t in self.accumulated_text)
             self.output_tokens = max(1, total_chars // 4)
@@ -720,13 +744,10 @@ class StreamTranslator:
 
     def process_chunk(self, chunk: Dict) -> str:
         """Process a single OpenAI streaming chunk."""
-        # Capture usage if present in any chunk
         if "usage" in chunk and chunk["usage"]:
             self.last_usage = chunk["usage"]
 
         choices = chunk.get("choices", [])
-
-        # Usage-only chunk (e.g. final chunk with stream_options.include_usage)
         if not choices and "usage" in chunk:
             self.finish(chunk.get("usage"))
             return "done"
@@ -738,18 +759,15 @@ class StreamTranslator:
         delta = choice.get("delta", {})
         finish_reason = choice.get("finish_reason")
 
-        # Text / reasoning content
         text = delta.get("content") or delta.get("reasoning")
         if text:
             self.emit_text_delta(text)
 
-        # Tool calls
         tool_calls = delta.get("tool_calls", [])
         for tc in tool_calls:
             tc_idx = tc.get("index", 0)
             self.handle_tool_call_delta(tc_idx, tc)
 
-        # Finish reason
         if finish_reason:
             self.finish_reason = FINISH_REASON_MAP.get(finish_reason, "end_turn")
 
@@ -785,11 +803,11 @@ def build_error_response(status: int, message: str) -> bytes:
 
 
 # =============================================================================
-# GATEWAY CONFIGURATION (Runtime State)
+# GATEWAY CONFIGURATION & RUNTIME STATE
 # =============================================================================
 
 class GatewayConfig:
-    """Holds the active gateway configuration set via CLI."""
+    """Holds the active gateway configuration and callbacks."""
 
     def __init__(self):
         self.provider_name: str = ""
@@ -801,11 +819,15 @@ class GatewayConfig:
         self.insecure_ssl: bool = False
         self.request_count: int = 0
         self.start_time: float = 0.0
+        self.is_running: bool = False
+        self.server_instance: Optional['ThreadedHTTPServer'] = None
+        self.server_thread: Optional[threading.Thread] = None
+        self.log_callback = None
         self.lock = threading.Lock()
 
     def log_request(self, method: str, path: str, model: str, status: int,
                     elapsed_ms: float, in_tokens: int, out_tokens: int):
-        """Log a request to the console."""
+        """Log a request to the console and to GUI if registered."""
         with self.lock:
             self.request_count += 1
 
@@ -819,8 +841,13 @@ class GatewayConfig:
             f"{C.DIM}({elapsed_ms:.0f}ms, {in_tokens}in/{out_tokens}out){C.RESET}"
         )
 
+        if self.log_callback:
+            try:
+                self.log_callback(ts, method, path, model, status, elapsed_ms, in_tokens, out_tokens)
+            except Exception:
+                pass
 
-# Global config instance
+
 CONFIG = GatewayConfig()
 
 
@@ -831,21 +858,17 @@ CONFIG = GatewayConfig()
 class GatewayHandler(BaseHTTPRequestHandler):
     """Handles incoming Anthropic API requests and proxies to OpenAI backend."""
 
-    # Suppress default access logging
     def log_message(self, format, *args):
         pass
 
     def _normalize_path(self) -> str:
-        """Normalize URL path, stripping query parameters and repeated /v1."""
         raw_path = self.path.split("?")[0].rstrip("/")
         parts = [p for p in raw_path.split("/") if p]
-        # Collapse repeated v1 (e.g. /v1/v1/messages -> /v1/messages)
         if len(parts) >= 2 and parts[0] == "v1" and parts[1] == "v1":
             parts.pop(0)
         return "/" + "/".join(parts)
 
     def _send_json(self, status: int, body: bytes, headers: Optional[Dict] = None):
-        """Send a JSON response."""
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("anthropic-version", "2023-06-01")
@@ -858,22 +881,19 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_error(self, status: int, message: str, headers: Optional[Dict] = None):
-        """Send an Anthropic-format error response."""
         self._send_json(status, build_error_response(status, message), headers)
 
     def _start_sse(self):
-        """Begin an SSE streaming response."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("Connection", "close")
         self.send_header("anthropic-version", "2023-06-01")
         self.send_header("x-request-id", str(uuid.uuid4()))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
     def do_OPTIONS(self):
-        """CORS preflight handling."""
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -884,6 +904,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self._normalize_path()
+
+        if path in ("/_shutdown", "/shutdown"):
+            self._send_json(200, b'{"status":"shutting_down"}')
+            if CONFIG.server_instance:
+                threading.Thread(target=CONFIG.server_instance.shutdown).start()
+            return
 
         if path in ("/healthz", "/health"):
             self._send_json(200, json.dumps({
@@ -897,12 +923,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
 
         if path in ("/v1/models", "/models"):
-            # Return model aliases for Claude Code compatibility
             models = [
                 {"id": CONFIG.backend_model, "object": "model", "display_name": CONFIG.backend_model},
-                {"id": "claude-sonnet-4-20250514", "object": "model", "display_name": "Claude Sonnet 4"},
                 {"id": "claude-3-5-sonnet-20241022", "object": "model", "display_name": "Claude 3.5 Sonnet"},
                 {"id": "claude-3-5-haiku-20241022", "object": "model", "display_name": "Claude 3.5 Haiku"},
+                {"id": "claude-sonnet-4-20250514", "object": "model", "display_name": "Claude Sonnet 4"},
                 {"id": "claude-3-haiku-20240307", "object": "model", "display_name": "Claude 3 Haiku"},
                 {"id": "claude-3-opus-20240229", "object": "model", "display_name": "Claude 3 Opus"},
             ]
@@ -929,7 +954,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def _handle_messages(self):
         t0 = time.time()
 
-        # Read request body
         try:
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b"{}"
@@ -938,17 +962,15 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send_error(400, f"Invalid request body: {e}")
             return
 
-        model_alias = body.get("model", "claude-sonnet-4-20250514")
+        model_alias = body.get("model", "claude-3-5-sonnet-20241022")
         is_stream = body.get("stream", False)
 
-        # Translate to OpenAI format
         try:
             openai_body = build_openai_request(body, CONFIG.backend_model)
         except Exception as e:
             self._send_error(400, f"Request translation error: {e}")
             return
 
-        # Build upstream request
         url = build_chat_url(CONFIG.base_url)
         headers = {
             "Content-Type": "application/json",
@@ -956,7 +978,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
             "Authorization": f"Bearer {CONFIG.api_key}",
             "User-Agent": f"ccgate/{VERSION}",
         }
-        # OpenRouter-specific headers
         if "openrouter.ai" in url:
             headers["HTTP-Referer"] = "https://github.com/Key-Switcher/ccgate"
             headers["X-Title"] = "ccgate - Claude Code Gateway"
@@ -996,7 +1017,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send_error(502, f"Upstream error: {e}")
             return
 
-        # Translate response
         translated = translate_openai_response(body, model_alias)
         resp_bytes = json.dumps(translated).encode("utf-8")
 
@@ -1031,7 +1051,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send_error(502, f"Upstream connection error: {e}")
             return
 
-        # Start SSE response to Claude Code
         self._start_sse()
         translator = StreamTranslator(self.wfile, model_alias)
         finished = False
@@ -1057,7 +1076,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     except json.JSONDecodeError:
                         continue
         except (BrokenPipeError, ConnectionResetError):
-            # Client disconnected (e.g. user pressed Ctrl+C in Claude Code)
             finished = True
         except Exception as e:
             if not finished:
@@ -1128,21 +1146,195 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
 
 # =============================================================================
-# THREADED HTTP SERVER
+# THREADED HTTP SERVER (WITH CLEAN SOCKET RE-USE)
 # =============================================================================
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """Thread-per-request HTTP server."""
+    """Thread-per-request HTTP server with clean address reuse."""
     daemon_threads = True
     allow_reuse_address = True
 
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except Exception:
+            pass
+        super().server_bind()
+
 
 # =============================================================================
-# CLI — INTERACTIVE PROVIDER / MODEL / KEY SELECTION
+# SERVER LIFECYCLE MANAGEMENT (START / STOP)
+# =============================================================================
+
+def start_server_thread(port: Optional[int] = None, host: Optional[str] = None) -> Tuple[bool, str]:
+    """Start the gateway server in a background thread."""
+    if CONFIG.is_running:
+        return True, f"Gateway already running on http://{CONFIG.host}:{CONFIG.port}"
+
+    if port:
+        CONFIG.port = port
+    if host:
+        CONFIG.host = host
+
+    # Reclaim port if left open by previous instance
+    if not free_port_if_in_use(CONFIG.port, CONFIG.host):
+        return False, f"Port {CONFIG.port} is busy and could not be released. Please try another port."
+
+    CONFIG.start_time = time.time()
+    CONFIG.request_count = 0
+
+    try:
+        server = ThreadedHTTPServer((CONFIG.host, CONFIG.port), GatewayHandler)
+        CONFIG.server_instance = server
+        CONFIG.is_running = True
+    except Exception as e:
+        CONFIG.is_running = False
+        return False, f"Failed to bind to {CONFIG.host}:{CONFIG.port}: {e}"
+
+    def serve():
+        try:
+            server.serve_forever()
+        except Exception:
+            pass
+        finally:
+            CONFIG.is_running = False
+            try:
+                server.server_close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=serve, daemon=True)
+    CONFIG.server_thread = t
+    t.start()
+
+    return True, f"Gateway started on http://{CONFIG.host}:{CONFIG.port}"
+
+
+def stop_server_thread() -> Tuple[bool, str]:
+    """Cleanly shut down the gateway server and release the port."""
+    if not CONFIG.is_running or not CONFIG.server_instance:
+        CONFIG.is_running = False
+        return True, "Gateway is stopped."
+
+    try:
+        # Trigger shutdown from a separate thread so it doesn't deadlock
+        threading.Thread(target=CONFIG.server_instance.shutdown).start()
+    except Exception:
+        pass
+
+    try:
+        CONFIG.server_instance.server_close()
+    except Exception:
+        pass
+
+    CONFIG.is_running = False
+    CONFIG.server_instance = None
+    time.sleep(0.3)
+    return True, "Gateway stopped cleanly."
+
+
+# Register clean exit on process termination
+atexit.register(stop_server_thread)
+
+
+# =============================================================================
+# CLAUDE CODE CONFIGURATION (settings.json)
+# =============================================================================
+
+def apply_claude_settings(port: int = DEFAULT_PORT, host: str = DEFAULT_HOST,
+                          model_to_set: Optional[str] = None) -> Tuple[bool, str]:
+    """Write gateway URL and model configuration to ~/.claude/settings.json."""
+    url = f"http://{host}:{port}"
+    try:
+        settings = {}
+        if CLAUDE_SETTINGS.exists():
+            try:
+                settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
+            except Exception:
+                settings = {}
+
+        env = settings.get("env", {})
+        env["ANTHROPIC_BASE_URL"] = url
+        env["ANTHROPIC_AUTH_TOKEN"] = "ccgate-local"
+
+        # Use standard Claude model alias so Claude Code sees a 200k context window without warnings
+        chosen_alias = "claude-3-5-sonnet-20241022"
+        env["ANTHROPIC_MODEL"] = chosen_alias
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = "claude-3-5-haiku-20241022"
+        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = chosen_alias
+        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = chosen_alias
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "claude-3-5-haiku-20241022"
+        settings["model"] = chosen_alias
+
+        settings["env"] = env
+
+        CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        return True, f"Claude Code configured! Base URL: {url}"
+    except Exception as e:
+        return False, f"Failed to update settings.json: {e}"
+
+
+# =============================================================================
+# DOCTOR (PROVIDER HEALTH TEST)
+# =============================================================================
+
+def test_single_provider(prov_name: str, base_url: str, model: str, api_key: str,
+                         insecure_ssl: bool = False) -> Tuple[bool, str, float]:
+    """Test a single provider with a real tiny request."""
+    if not api_key:
+        return False, "No API key provided", 0.0
+
+    url = build_chat_url(base_url)
+    payload = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "Say OK"}],
+        "max_tokens": 5,
+    }).encode("utf-8")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": f"ccgate/{VERSION}",
+    }
+    if "openrouter.ai" in url:
+        headers["HTTP-Referer"] = "https://github.com/Key-Switcher/ccgate"
+        headers["X-Title"] = "ccgate - Claude Code Gateway"
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    ctx = ssl.create_default_context()
+    if insecure_ssl or os.environ.get("GATEWAY_INSECURE_SSL") == "1":
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            elapsed = (time.time() - t0) * 1000
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            reply = ""
+            if body.get("choices"):
+                msg = body["choices"][0].get("message") or {}
+                reply = (msg.get("content") or msg.get("reasoning") or "").strip().replace("\n", " ")[:40]
+            return True, reply or "OK", elapsed
+    except urllib.error.HTTPError as e:
+        elapsed = (time.time() - t0) * 1000
+        try:
+            err_detail = json.loads(e.read().decode("utf-8", errors="replace"))
+            msg = err_detail.get("error", {}).get("message", e.reason)
+        except Exception:
+            msg = e.reason
+        return False, f"HTTP {e.code}: {msg[:60]}", elapsed
+    except Exception as e:
+        elapsed = (time.time() - t0) * 1000
+        return False, str(e)[:60], elapsed
+
+
+# =============================================================================
+# CLI IMPLEMENTATION
 # =============================================================================
 
 def print_banner():
-    """Print the startup banner."""
     print(f"""
 {C.BLUE}{C.BOLD}+----------------------------------------------------------+
 |           ccgate - Claude Code Gateway  v{VERSION}           |
@@ -1151,158 +1343,7 @@ def print_banner():
 """)
 
 
-def select_from_list(prompt: str, items: List[str], allow_custom: bool = False) -> int:
-    """Display a numbered list and get user selection."""
-    for i, item in enumerate(items, 1):
-        print(f"  {C.CYAN}[{i}]{C.RESET} {item}")
-    if allow_custom:
-        print(f"  {C.CYAN}[{len(items) + 1}]{C.RESET} {C.DIM}Enter manually{C.RESET}")
-
-    while True:
-        try:
-            max_val = len(items) + (1 if allow_custom else 0)
-            choice = input(f"\n{prompt} [{C.BOLD}1-{max_val}{C.RESET}]: ").strip()
-            idx = int(choice) - 1
-            if 0 <= idx < max_val:
-                return idx
-        except (ValueError, EOFError):
-            pass
-        print(f"  {C.RED}Invalid choice. Try again.{C.RESET}")
-
-
-def interactive_setup() -> bool:
-    """Interactive CLI to configure the gateway. Returns True if config is set."""
-    providers = load_providers_json()
-    saved_keys = load_keys_from_excel()
-
-    if not providers:
-        print(f"{C.RED}No providers found in {PROVIDERS_FILE}{C.RESET}")
-        print(f"{C.DIM}Add providers with api_tester.py or edit providers.json manually.{C.RESET}")
-        return False
-
-    # 1. Select provider
-    print(f"{C.BOLD}Select backend provider:{C.RESET}")
-    prov_names = list(providers.keys())
-    prov_items = []
-    for name in prov_names:
-        url = providers[name].get("base_url", "")
-        model_count = len(providers[name].get("models", []))
-        prov_items.append(f"{name:<16} {C.DIM}({url}, {model_count} models){C.RESET}")
-
-    idx = select_from_list("Provider", prov_items)
-    prov_name = prov_names[idx]
-    prov_info = providers[prov_name]
-
-    CONFIG.provider_name = prov_name
-    CONFIG.base_url = prov_info.get("base_url", "")
-
-    # 2. Select model
-    models = prov_info.get("models", [])
-    if not models:
-        print(f"\n{C.YELLOW}No models listed for {prov_name}. Enter model name:{C.RESET}")
-        CONFIG.backend_model = input("  Model: ").strip()
-        if not CONFIG.backend_model:
-            print(f"{C.RED}Model is required.{C.RESET}")
-            return False
-    else:
-        print(f"\n{C.BOLD}Select model:{C.RESET}")
-        idx = select_from_list("Model", models, allow_custom=True)
-        if idx < len(models):
-            CONFIG.backend_model = models[idx]
-        else:
-            CONFIG.backend_model = input("  Enter model name: ").strip()
-            if not CONFIG.backend_model:
-                print(f"{C.RED}Model is required.{C.RESET}")
-                return False
-
-    # 3. Select API key
-    matching_keys = {}
-    p_low = prov_name.strip().lower()
-    for nick, data in saved_keys.items():
-        prov = data.get("provider", "").strip().lower()
-        if prov == p_low or p_low in prov or p_low in nick.lower():
-            matching_keys[nick] = data
-
-    if matching_keys:
-        print(f"\n{C.BOLD}Select API key:{C.RESET}")
-        key_names = list(matching_keys.keys())
-        key_items = [f"{nick} {C.DIM}({matching_keys[nick]['provider']}){C.RESET}" for nick in key_names]
-        idx = select_from_list("API Key", key_items, allow_custom=True)
-        if idx < len(key_names):
-            k = matching_keys[key_names[idx]]["key"]
-            if k.lower().startswith("bearer "):
-                k = k[7:].strip()
-            CONFIG.api_key = k
-        else:
-            CONFIG.api_key = input("  Enter API key: ").strip()
-    else:
-        all_key_names = list(saved_keys.keys())
-        if all_key_names:
-            print(f"\n{C.BOLD}Select API key:{C.RESET}")
-            key_items = [f"{n} {C.DIM}({saved_keys[n]['provider']}){C.RESET}" for n in all_key_names]
-            idx = select_from_list("API Key", key_items, allow_custom=True)
-            if idx < len(all_key_names):
-                k = saved_keys[all_key_names[idx]]["key"]
-                if k.lower().startswith("bearer "):
-                    k = k[7:].strip()
-                CONFIG.api_key = k
-            else:
-                CONFIG.api_key = input("  Enter API key: ").strip()
-        else:
-            print(f"\n{C.YELLOW}No saved keys found. Enter API key manually:{C.RESET}")
-            CONFIG.api_key = input("  API Key: ").strip()
-
-    if not CONFIG.api_key:
-        print(f"{C.RED}API key is required.{C.RESET}")
-        return False
-
-    return True
-
-
-# =============================================================================
-# COMMANDS: setup, doctor
-# =============================================================================
-
-def cmd_setup(model_to_set: Optional[str] = None):
-    """Write gateway config to Claude Code's settings.json."""
-    url = f"http://{CONFIG.host}:{CONFIG.port}"
-    print(f"\n{C.BOLD}Configuring Claude Code...{C.RESET}")
-
-    settings = {}
-    if CLAUDE_SETTINGS.exists():
-        try:
-            settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
-        except Exception:
-            settings = {}
-
-    env = settings.get("env", {})
-    env["ANTHROPIC_BASE_URL"] = url
-    env["ANTHROPIC_AUTH_TOKEN"] = "ccgate-local"
-
-    chosen_model = model_to_set or CONFIG.backend_model
-    if chosen_model:
-        env["ANTHROPIC_MODEL"] = chosen_model
-        env["ANTHROPIC_SMALL_FAST_MODEL"] = chosen_model
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = chosen_model
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = chosen_model
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = chosen_model
-        settings["model"] = chosen_model
-
-    settings["env"] = env
-
-    CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-
-    print(f"  {C.GREEN}[OK]{C.RESET} Updated {C.CYAN}{CLAUDE_SETTINGS}{C.RESET}")
-    print(f"  {C.GREEN}[OK]{C.RESET} ANTHROPIC_BASE_URL = {C.BOLD}{url}{C.RESET}")
-    print(f"  {C.GREEN}[OK]{C.RESET} ANTHROPIC_AUTH_TOKEN = {C.BOLD}ccgate-local{C.RESET}")
-    if chosen_model:
-        print(f"  {C.GREEN}[OK]{C.RESET} Model set to: {C.BOLD}{chosen_model}{C.RESET}")
-    print(f"\n{C.YELLOW}Restart Claude Code for changes to take effect.{C.RESET}\n")
-
-
 def cmd_doctor():
-    """Test all configured providers with real HTTP calls."""
     print_banner()
     providers = load_providers_json()
     saved_keys = load_keys_from_excel()
@@ -1319,115 +1360,546 @@ def cmd_doctor():
         model = models[0] if models else "test-model"
 
         api_key = find_key_for_provider(prov_name, saved_keys)
-        if api_key.lower().startswith("bearer "):
-            api_key = api_key[7:].strip()
-
         if not api_key:
             print(f"  {C.YELLOW}[?]{C.RESET} {prov_name:<16} -- {C.DIM}No API key found in keys.xlsx, skipping{C.RESET}")
             continue
 
-        url = build_chat_url(base_url)
-        payload = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": "Say OK"}],
-            "max_tokens": 5,
-        }).encode("utf-8")
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": f"ccgate/{VERSION}",
-        }
-        if "openrouter.ai" in url:
-            headers["HTTP-Referer"] = "https://github.com/Key-Switcher/ccgate"
-            headers["X-Title"] = "ccgate - Claude Code Gateway"
-
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        ctx = ssl.create_default_context()
-        if CONFIG.insecure_ssl or os.environ.get("GATEWAY_INSECURE_SSL") == "1":
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
-        try:
-            t0 = time.time()
-            with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
-                elapsed = (time.time() - t0) * 1000
-                body = json.loads(resp.read().decode("utf-8", errors="replace"))
-                reply = ""
-                if body.get("choices"):
-                    msg = body["choices"][0].get("message") or {}
-                    reply = (msg.get("content") or msg.get("reasoning") or "")[:50].strip().replace("\n", " ")
-                print(
-                    f"  {C.GREEN}[OK]{C.RESET} {prov_name:<16} "
-                    f"{C.DIM}({model}){C.RESET} -- "
-                    f"{C.GREEN}{elapsed:.0f}ms{C.RESET} "
-                    f"{C.DIM}\"{reply}\"{C.RESET}"
-                )
-        except urllib.error.HTTPError as e:
-            elapsed = (time.time() - t0) * 1000
-            try:
-                err_detail = json.loads(e.read().decode("utf-8", errors="replace"))
-                msg = err_detail.get("error", {}).get("message", e.reason)
-            except Exception:
-                msg = e.reason
-            print(
-                f"  {C.RED}[FAIL]{C.RESET} {prov_name:<16} "
-                f"{C.DIM}({model}){C.RESET} -- "
-                f"{C.RED}{e.code} {msg[:60]}{C.RESET} "
-                f"{C.DIM}({elapsed:.0f}ms){C.RESET}"
-            )
-        except Exception as e:
-            print(
-                f"  {C.RED}[FAIL]{C.RESET} {prov_name:<16} "
-                f"{C.DIM}({model}){C.RESET} -- "
-                f"{C.RED}{str(e)[:60]}{C.RESET}"
-            )
-
+        ok, msg, elapsed = test_single_provider(prov_name, base_url, model, api_key, CONFIG.insecure_ssl)
+        if ok:
+            print(f"  {C.GREEN}[OK]{C.RESET} {prov_name:<16} {C.DIM}({model}){C.RESET} -- {C.GREEN}{elapsed:.0f}ms{C.RESET} \"{msg}\"")
+        else:
+            print(f"  {C.RED}[FAIL]{C.RESET} {prov_name:<16} {C.DIM}({model}){C.RESET} -- {C.RED}{msg}{C.RESET} ({elapsed:.0f}ms)")
     print()
 
 
-# =============================================================================
-# SERVER START
-# =============================================================================
+def run_cli_interactive():
+    print_banner()
+    providers = load_providers_json()
+    saved_keys = load_keys_from_excel()
 
-def start_server():
-    """Start the gateway HTTP server."""
-    CONFIG.start_time = time.time()
+    if not providers:
+        print(f"{C.RED}No providers found in providers.json{C.RESET}")
+        sys.exit(1)
 
-    server = ThreadedHTTPServer((CONFIG.host, CONFIG.port), GatewayHandler)
+    print(f"{C.BOLD}Select backend provider:{C.RESET}")
+    pnames = list(providers.keys())
+    for i, p in enumerate(pnames, 1):
+        print(f"  [{i}] {p}")
+    try:
+        pidx = int(input(f"\nChoice [1-{len(pnames)}]: ")) - 1
+        prov_name = pnames[pidx]
+    except Exception:
+        print(f"{C.RED}Invalid selection.{C.RESET}")
+        sys.exit(1)
 
-    # Graceful shutdown on Ctrl+C
-    def shutdown_handler(signum, frame):
-        print(f"\n\n{C.YELLOW}Shutting down gateway...{C.RESET}")
-        threading.Thread(target=server.shutdown).start()
+    prov_info = providers[prov_name]
+    CONFIG.provider_name = prov_name
+    CONFIG.base_url = prov_info.get("base_url", "")
 
-    signal.signal(signal.SIGINT, shutdown_handler)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, shutdown_handler)
+    models = prov_info.get("models", [])
+    if models:
+        print(f"\n{C.BOLD}Select model:{C.RESET}")
+        for i, m in enumerate(models, 1):
+            print(f"  [{i}] {m}")
+        print(f"  [{len(models) + 1}] Enter manually")
+        try:
+            midx = int(input(f"\nChoice [1-{len(models) + 1}]: ")) - 1
+            if midx < len(models):
+                CONFIG.backend_model = models[midx]
+            else:
+                CONFIG.backend_model = input("Enter model: ").strip()
+        except Exception:
+            CONFIG.backend_model = models[0]
+    else:
+        CONFIG.backend_model = input("Enter model name: ").strip()
+
+    k = find_key_for_provider(prov_name, saved_keys)
+    if k:
+        print(f"\n{C.GREEN}[OK]{C.RESET} Using saved API key for {prov_name}")
+        CONFIG.api_key = k
+    else:
+        CONFIG.api_key = input("Enter API key: ").strip()
+
+    apply_claude_settings(CONFIG.port, CONFIG.host, CONFIG.backend_model)
+
+    ok, msg = start_server_thread(CONFIG.port, CONFIG.host)
+    if not ok:
+        print(f"{C.RED}{msg}{C.RESET}")
+        sys.exit(1)
 
     url = f"http://{CONFIG.host}:{CONFIG.port}"
-
     print(f"""
 {C.GREEN}{C.BOLD}[OK] Gateway running{C.RESET} on {C.CYAN}{C.BOLD}{url}{C.RESET}
 
-{C.BOLD}  Provider :{C.RESET} {CONFIG.provider_name}
-{C.BOLD}  Model    :{C.RESET} {CONFIG.backend_model}
-{C.BOLD}  Endpoint :{C.RESET} {build_chat_url(CONFIG.base_url)}
+  Provider : {CONFIG.provider_name}
+  Model    : {CONFIG.backend_model}
+  Endpoint : {build_chat_url(CONFIG.base_url)}
 
-{C.BOLD}Claude Code configuration:{C.RESET}
-  {C.CYAN}ANTHROPIC_BASE_URL{C.RESET}={C.BOLD}{url}{C.RESET}
-  {C.CYAN}ANTHROPIC_AUTH_TOKEN{C.RESET}={C.BOLD}ccgate-local{C.RESET}
-
-{C.DIM}Press Ctrl+C to stop.{C.RESET}
+Claude Code is configured! Run: {C.BOLD}claude{C.RESET} in your terminal.
+Press Ctrl+C to stop.
 {"-" * 60}""")
 
     try:
-        server.serve_forever()
-    except Exception:
-        pass
-    finally:
-        server.server_close()
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\n{C.YELLOW}Stopping gateway...{C.RESET}")
+        stop_server_thread()
         print(f"{C.GREEN}Gateway stopped.{C.RESET}\n")
+
+
+# =============================================================================
+# PYSIDE6 GUI IMPLEMENTATION
+# =============================================================================
+
+def run_gui():
+    """Launch the modern PySide6 GUI control panel."""
+    try:
+        from PySide6.QtWidgets import (
+            QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+            QGridLayout, QLabel, QPushButton, QComboBox, QLineEdit, QSpinBox,
+            QTextEdit, QFrame, QMessageBox, QListView
+        )
+        from PySide6.QtCore import Qt, QTimer, Signal, QObject
+        from PySide6.QtGui import QFont, QIcon, QTextCursor
+    except ImportError:
+        print(f"{C.YELLOW}PySide6 is not installed. Falling back to interactive CLI.{C.RESET}")
+        run_cli_interactive()
+        return
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    # Bridge for thread-safe UI logging
+    class LogEmitter(QObject):
+        log_signal = Signal(str, str, str, str, int, float, int, int)
+
+    emitter = LogEmitter()
+
+    def log_bridge(ts, method, path, model, status, elapsed, in_tok, out_tok):
+        emitter.log_signal.emit(ts, method, path, model, status, elapsed, in_tok, out_tok)
+
+    CONFIG.log_callback = log_bridge
+
+    # Theme stylesheet
+    STYLESHEET = """
+        QMainWindow {
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+        QWidget {
+            color: #f1f5f9;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            font-size: 13px;
+        }
+        QFrame#card {
+            background-color: #151d2f;
+            border: 1px solid #23314d;
+            border-radius: 10px;
+        }
+        QLabel {
+            color: #94a3b8;
+            font-weight: 500;
+        }
+        QLabel#title {
+            color: #38bdf8;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        QLabel#subtitle {
+            color: #64748b;
+            font-size: 12px;
+        }
+        QLabel#status_running {
+            color: #10b981;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        QLabel#status_stopped {
+            color: #ef4444;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        QComboBox, QLineEdit, QSpinBox {
+            background-color: #0d1424;
+            border: 1px solid #28395a;
+            border-radius: 6px;
+            padding: 7px 12px;
+            color: #f8fafc;
+            selection-background-color: #2563eb;
+        }
+        QComboBox:focus, QLineEdit:focus, QSpinBox:focus {
+            border: 1px solid #38bdf8;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 24px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #0d1424;
+            color: #f8fafc;
+            border: 1px solid #28395a;
+            selection-background-color: #1d4ed8;
+            padding: 4px;
+        }
+        QPushButton {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: 600;
+            color: #f8fafc;
+        }
+        QPushButton:hover {
+            background-color: #334155;
+        }
+        QPushButton#btn_start {
+            background-color: #059669;
+            border: 1px solid #10b981;
+            font-size: 14px;
+            padding: 10px 20px;
+        }
+        QPushButton#btn_start:hover {
+            background-color: #10b981;
+        }
+        QPushButton#btn_stop {
+            background-color: #dc2626;
+            border: 1px solid #ef4444;
+            font-size: 14px;
+            padding: 10px 20px;
+        }
+        QPushButton#btn_stop:hover {
+            background-color: #ef4444;
+        }
+        QPushButton#btn_apply {
+            background-color: #2563eb;
+            border: 1px solid #3b82f6;
+        }
+        QPushButton#btn_apply:hover {
+            background-color: #3b82f6;
+        }
+        QTextEdit {
+            background-color: #070b14;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #e2e8f0;
+            padding: 8px;
+        }
+    """
+
+    class CcgateWindow(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            self.setWindowTitle(f"ccgate — Claude Code Gateway v{VERSION}")
+            self.setMinimumSize(780, 720)
+            self.setStyleSheet(STYLESHEET)
+
+            self.providers = load_providers_json()
+            self.saved_keys = load_keys_from_excel()
+
+            self.init_ui()
+            self.populate_data()
+
+            # Connect log signal
+            emitter.log_signal.connect(self.append_log)
+
+            # Auto-update status timer
+            self.timer = QTimer(self)
+            self.timer.timeout.connect(self.update_status_display)
+            self.timer.start(1000)
+
+        def init_ui(self):
+            central = QWidget()
+            self.setCentralWidget(central)
+            main_layout = QVBoxLayout(central)
+            main_layout.setContentsMargins(18, 18, 18, 18)
+            main_layout.setSpacing(14)
+
+            # --- 1. Header Card ---
+            header_card = QFrame()
+            header_card.setObjectName("card")
+            h_layout = QHBoxLayout(header_card)
+            h_layout.setContentsMargins(16, 12, 16, 12)
+
+            title_box = QVBoxLayout()
+            title_lbl = QLabel(f"ccgate  v{VERSION}")
+            title_lbl.setObjectName("title")
+            sub_lbl = QLabel("Self-hosted reverse proxy for Claude Code (Anthropic <-> OpenAI)")
+            sub_lbl.setObjectName("subtitle")
+            title_box.addWidget(title_lbl)
+            title_box.addWidget(sub_lbl)
+            h_layout.addLayout(title_box)
+
+            h_layout.addStretch()
+
+            status_box = QVBoxLayout()
+            status_box.setAlignment(Qt.AlignRight)
+            self.status_lbl = QLabel("● Stopped")
+            self.status_lbl.setObjectName("status_stopped")
+            self.info_lbl = QLabel("Port: 5005 | Req: 0")
+            self.info_lbl.setObjectName("subtitle")
+            status_box.addWidget(self.status_lbl)
+            status_box.addWidget(self.info_lbl)
+            h_layout.addLayout(status_box)
+
+            main_layout.addWidget(header_card)
+
+            # --- 2. Configuration Card ---
+            config_card = QFrame()
+            config_card.setObjectName("card")
+            c_layout = QGridLayout(config_card)
+            c_layout.setContentsMargins(16, 16, 16, 16)
+            c_layout.setHorizontalSpacing(14)
+            c_layout.setVerticalSpacing(12)
+
+            # Provider
+            c_layout.addWidget(QLabel("Backend Provider:"), 0, 0)
+            self.prov_combo = QComboBox()
+            self.prov_combo.setView(QListView())
+            self.prov_combo.currentIndexChanged.connect(self.on_provider_changed)
+            c_layout.addWidget(self.prov_combo, 0, 1)
+
+            # Port
+            c_layout.addWidget(QLabel("Gateway Port:"), 0, 2)
+            self.port_spin = QSpinBox()
+            self.port_spin.setRange(1024, 65535)
+            self.port_spin.setValue(DEFAULT_PORT)
+            c_layout.addWidget(self.port_spin, 0, 3)
+
+            # Model
+            c_layout.addWidget(QLabel("Backend Model:"), 1, 0)
+            self.model_combo = QComboBox()
+            self.model_combo.setEditable(True)
+            self.model_combo.setView(QListView())
+            c_layout.addWidget(self.model_combo, 1, 1, 1, 3)
+
+            # API Key
+            c_layout.addWidget(QLabel("API Key:"), 2, 0)
+            key_layout = QHBoxLayout()
+            self.key_edit = QLineEdit()
+            self.key_edit.setEchoMode(QLineEdit.Password)
+            self.key_edit.setPlaceholderText("Paste or select key from keys.xlsx...")
+            key_layout.addWidget(self.key_edit)
+
+            self.btn_toggle_key = QPushButton("👁")
+            self.btn_toggle_key.setFixedWidth(38)
+            self.btn_toggle_key.clicked.connect(self.toggle_key_visibility)
+            key_layout.addWidget(self.btn_toggle_key)
+
+            c_layout.addLayout(key_layout, 2, 1, 1, 3)
+
+            # Base URL info
+            c_layout.addWidget(QLabel("Endpoint URL:"), 3, 0)
+            self.url_lbl = QLabel("")
+            self.url_lbl.setStyleSheet("color: #38bdf8; font-family: Consolas;")
+            c_layout.addWidget(self.url_lbl, 3, 1, 1, 3)
+
+            main_layout.addWidget(config_card)
+
+            # --- 3. Actions Row ---
+            act_layout = QHBoxLayout()
+            act_layout.setSpacing(10)
+
+            self.btn_toggle_server = QPushButton("▶ Start Gateway")
+            self.btn_toggle_server.setObjectName("btn_start")
+            self.btn_toggle_server.clicked.connect(self.toggle_server)
+            act_layout.addWidget(self.btn_toggle_server)
+
+            self.btn_apply_claude = QPushButton("⚡ Configure Claude Code")
+            self.btn_apply_claude.setObjectName("btn_apply")
+            self.btn_apply_claude.setToolTip("Sets ANTHROPIC_BASE_URL to http://127.0.0.1:5005 in ~/.claude/settings.json")
+            self.btn_apply_claude.clicked.connect(self.on_apply_claude)
+            act_layout.addWidget(self.btn_apply_claude)
+
+            self.btn_test = QPushButton("🩺 Test Provider")
+            self.btn_test.clicked.connect(self.on_test_provider)
+            act_layout.addWidget(self.btn_test)
+
+            self.btn_clear_log = QPushButton("Clear Log")
+            self.btn_clear_log.clicked.connect(lambda: self.log_text.clear())
+            act_layout.addWidget(self.btn_clear_log)
+
+            main_layout.addLayout(act_layout)
+
+            # --- 4. Live Traffic Log Card ---
+            log_card = QFrame()
+            log_card.setObjectName("card")
+            l_layout = QVBoxLayout(log_card)
+            l_layout.setContentsMargins(14, 14, 14, 14)
+
+            log_header = QHBoxLayout()
+            log_title = QLabel("Live Traffic Monitor")
+            log_title.setStyleSheet("font-weight: 700; color: #cbd5e1;")
+            log_header.addWidget(log_title)
+            log_header.addStretch()
+
+            self.copy_btn = QPushButton("Copy Gateway URL")
+            self.copy_btn.clicked.connect(self.copy_url)
+            log_header.addWidget(self.copy_btn)
+
+            l_layout.addLayout(log_header)
+
+            self.log_text = QTextEdit()
+            self.log_text.setReadOnly(True)
+            l_layout.addWidget(self.log_text)
+
+            main_layout.addWidget(log_card)
+
+        def populate_data(self):
+            """Load providers and saved keys into the UI."""
+            self.prov_combo.clear()
+            for p in self.providers.keys():
+                self.prov_combo.addItem(p)
+
+            # Default to Openrouter or Groq if present
+            for target in ["Openrouter", "groq", "NVIDIA"]:
+                idx = self.prov_combo.findText(target, Qt.MatchFixedString)
+                if idx >= 0:
+                    self.prov_combo.setCurrentIndex(idx)
+                    break
+
+            self.on_provider_changed()
+
+        def on_provider_changed(self):
+            """Update model list and key when provider changes."""
+            prov_name = self.prov_combo.currentText().strip()
+            prov_info = self.providers.get(prov_name, {})
+            base_url = prov_info.get("base_url", "")
+            self.url_lbl.setText(build_chat_url(base_url))
+
+            self.model_combo.clear()
+            models = prov_info.get("models", [])
+            for m in models:
+                self.model_combo.addItem(m)
+            if models:
+                self.model_combo.setCurrentIndex(0)
+
+            # Auto-find API key
+            k = find_key_for_provider(prov_name, self.saved_keys)
+            if k:
+                self.key_edit.setText(k)
+
+        def toggle_key_visibility(self):
+            if self.key_edit.echoMode() == QLineEdit.Password:
+                self.key_edit.setEchoMode(QLineEdit.Normal)
+                self.btn_toggle_key.setText("🔒")
+            else:
+                self.key_edit.setEchoMode(QLineEdit.Password)
+                self.btn_toggle_key.setText("👁")
+
+        def copy_url(self):
+            url = f"http://{DEFAULT_HOST}:{self.port_spin.value()}"
+            QApplication.clipboard().setText(url)
+            self.log_text.append(f"<span style='color:#38bdf8;'>[INFO] Copied {url} to clipboard</span>")
+
+        def toggle_server(self):
+            """Start or stop the gateway."""
+            if CONFIG.is_running:
+                ok, msg = stop_server_thread()
+                self.status_lbl.setText("● Stopped")
+                self.status_lbl.setObjectName("status_stopped")
+                self.status_lbl.setStyle(self.status_lbl.style())
+                self.btn_toggle_server.setText("▶ Start Gateway")
+                self.btn_toggle_server.setObjectName("btn_start")
+                self.btn_toggle_server.setStyle(self.btn_toggle_server.style())
+                self.log_text.append(f"<span style='color:#f59e0b;'>[GATEWAY] {msg}</span>")
+            else:
+                prov_name = self.prov_combo.currentText().strip()
+                prov_info = self.providers.get(prov_name, {})
+                CONFIG.provider_name = prov_name
+                CONFIG.base_url = prov_info.get("base_url", "")
+                CONFIG.backend_model = self.model_combo.currentText().strip()
+                CONFIG.api_key = self.key_edit.text().strip()
+                port = self.port_spin.value()
+
+                if not CONFIG.backend_model:
+                    QMessageBox.warning(self, "Missing Model", "Please specify or select a backend model.")
+                    return
+                if not CONFIG.api_key:
+                    QMessageBox.warning(self, "Missing Key", "Please provide an API key.")
+                    return
+
+                ok, msg = start_server_thread(port, DEFAULT_HOST)
+                if ok:
+                    url = f"http://{DEFAULT_HOST}:{port}"
+                    self.status_lbl.setText(f"● Running on {url}")
+                    self.status_lbl.setObjectName("status_running")
+                    self.status_lbl.setStyle(self.status_lbl.style())
+                    self.btn_toggle_server.setText("■ Stop Gateway")
+                    self.btn_toggle_server.setObjectName("btn_stop")
+                    self.btn_toggle_server.setStyle(self.btn_toggle_server.style())
+                    self.log_text.append(f"<span style='color:#10b981; font-weight:bold;'>[GATEWAY] {msg}</span>")
+                    self.log_text.append(f"<span style='color:#94a3b8;'>  Model: {CONFIG.backend_model} | Provider: {CONFIG.provider_name}</span>")
+                else:
+                    QMessageBox.critical(self, "Startup Error", msg)
+                    self.log_text.append(f"<span style='color:#ef4444;'>[ERROR] {msg}</span>")
+
+        def on_apply_claude(self):
+            """Configure ~/.claude/settings.json."""
+            port = self.port_spin.value()
+            model = self.model_combo.currentText().strip()
+            ok, msg = apply_claude_settings(port, DEFAULT_HOST, model)
+            if ok:
+                QMessageBox.information(self, "Claude Code Configured",
+                                        f"{msg}\n\nYou can now run 'claude' in your terminal!")
+                self.log_text.append(f"<span style='color:#38bdf8;'>[CONFIG] {msg}</span>")
+            else:
+                QMessageBox.critical(self, "Config Error", msg)
+
+        def on_test_provider(self):
+            """Test the selected provider connectivity."""
+            prov_name = self.prov_combo.currentText().strip()
+            prov_info = self.providers.get(prov_name, {})
+            base_url = prov_info.get("base_url", "")
+            model = self.model_combo.currentText().strip()
+            api_key = self.key_edit.text().strip()
+
+            if not api_key:
+                QMessageBox.warning(self, "Missing Key", "Please enter an API key to test.")
+                return
+
+            self.log_text.append(f"<span style='color:#94a3b8;'>[TEST] Testing {prov_name} ({model})...</span>")
+            self.btn_test.setEnabled(False)
+            QApplication.processEvents()
+
+            ok, msg, elapsed = test_single_provider(prov_name, base_url, model, api_key, CONFIG.insecure_ssl)
+            self.btn_test.setEnabled(True)
+
+            if ok:
+                self.log_text.append(f"<span style='color:#10b981; font-weight:bold;'>[TEST OK] {prov_name} ({elapsed:.0f}ms): \"{msg}\"</span>")
+            else:
+                self.log_text.append(f"<span style='color:#ef4444; font-weight:bold;'>[TEST FAIL] {prov_name} ({elapsed:.0f}ms): {msg}</span>")
+
+        def append_log(self, ts, method, path, model, status, elapsed, in_tok, out_tok):
+            color = "#10b981" if 200 <= status < 300 else "#ef4444"
+            line = (
+                f"<span style='color:#64748b;'>{ts}</span> "
+                f"<span style='color:#38bdf8;'>{method}</span> "
+                f"<span>{path}</span> "
+                f"<span style='color:#a855f7;'>-> {model}</span> "
+                f"<span style='color:{color}; font-weight:bold;'>[{status}]</span> "
+                f"<span style='color:#64748b;'>({elapsed:.0f}ms, {in_tok}in/{out_tok}out)</span>"
+            )
+            self.log_text.append(line)
+            self.log_text.moveCursor(QTextCursor.End)
+
+        def update_status_display(self):
+            if CONFIG.is_running:
+                uptime = int(time.time() - CONFIG.start_time)
+                self.info_lbl.setText(f"Up: {uptime}s | Req: {CONFIG.request_count}")
+            else:
+                self.info_lbl.setText(f"Port: {self.port_spin.value()} | Req: 0")
+
+        def closeEvent(self, event):
+            """Ensure background server thread is cleanly shut down when closing window."""
+            stop_server_thread()
+            event.accept()
+
+    win = CcgateWindow()
+    win.show()
+    sys.exit(app.exec())
 
 
 # =============================================================================
@@ -1438,21 +1910,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="ccgate - Claude Code Gateway",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Commands:
-  (default)    Interactive provider/model selection, then start gateway
-  setup        Configure Claude Code to use the gateway
-  doctor       Test all provider connections
-
-Examples:
-  python ccgate.py                                              # Interactive
-  python ccgate.py --provider groq --model openai/gpt-oss-20b  # Direct start
-  python ccgate.py --provider groq --setup                     # Configure Claude Code and run
-  python ccgate.py setup                                       # Configure Claude settings
-  python ccgate.py doctor                                      # Health check
-""",
     )
     parser.add_argument("command", nargs="?", default=None, help="Command: setup, doctor")
+    parser.add_argument("--cli", action="store_true", help="Run interactive terminal CLI instead of GUI")
     parser.add_argument("--provider", "-p", help="Provider name (from providers.json)")
     parser.add_argument("--model", "-m", help="Backend model name")
     parser.add_argument("--key", "-k", help="API key (or auto-found from keys.xlsx)")
@@ -1468,24 +1928,22 @@ Examples:
     CONFIG.host = args.host
     CONFIG.insecure_ssl = args.insecure
 
-    # --- Standalone Commands ---
+    # 1. Standalone commands
     if args.command == "doctor":
         cmd_doctor()
         return
 
     if args.command == "setup":
         print_banner()
-        cmd_setup(args.model)
+        apply_claude_settings(CONFIG.port, CONFIG.host, args.model)
         return
 
-    print_banner()
-
-    # --- CLI args mode ---
+    # 2. CLI direct start mode with --provider
     if args.provider:
+        print_banner()
         providers = load_providers_json()
         saved_keys = load_keys_from_excel()
 
-        # Find provider (case-insensitive)
         matched = None
         for pname in providers:
             if pname.strip().lower() == args.provider.strip().lower():
@@ -1493,49 +1951,57 @@ Examples:
                 break
         if not matched:
             print(f"{C.RED}Provider '{args.provider}' not found in providers.json{C.RESET}")
-            print(f"{C.DIM}Available: {', '.join(providers.keys())}{C.RESET}")
             sys.exit(1)
 
         CONFIG.provider_name = matched
         CONFIG.base_url = args.base_url or providers[matched].get("base_url", "")
-
-        if args.model:
-            CONFIG.backend_model = args.model
-        else:
-            models = providers[matched].get("models", [])
-            if models:
-                CONFIG.backend_model = models[0]
-            else:
-                print(f"{C.RED}No model specified and none listed for {matched}{C.RESET}")
-                sys.exit(1)
+        models = providers[matched].get("models", [])
+        CONFIG.backend_model = args.model or (models[0] if models else "")
 
         if args.key:
-            k = args.key.strip()
-            CONFIG.api_key = k[7:].strip() if k.lower().startswith("bearer ") else k
-        elif args.key_name:
-            if args.key_name in saved_keys:
-                k = saved_keys[args.key_name]["key"]
-                CONFIG.api_key = k[7:].strip() if k.lower().startswith("bearer ") else k
-            else:
-                print(f"{C.RED}Key '{args.key_name}' not found in keys.xlsx{C.RESET}")
-                sys.exit(1)
+            CONFIG.api_key = args.key.strip()
         else:
             CONFIG.api_key = find_key_for_provider(matched, saved_keys)
-            if not CONFIG.api_key:
-                print(f"{C.RED}No API key found for {matched}. Use --key or --key-name.{C.RESET}")
-                sys.exit(1)
 
-    # --- Interactive mode ---
-    else:
-        if not interactive_setup():
+        if not CONFIG.api_key:
+            print(f"{C.RED}No API key found for {matched}.{C.RESET}")
             sys.exit(1)
 
-    # Automatically configure Claude Code if requested
-    if args.setup:
-        cmd_setup()
+        if args.setup:
+            apply_claude_settings(CONFIG.port, CONFIG.host, CONFIG.backend_model)
 
-    # --- Start ---
-    start_server()
+        ok, msg = start_server_thread(CONFIG.port, CONFIG.host)
+        if not ok:
+            print(f"{C.RED}{msg}{C.RESET}")
+            sys.exit(1)
+
+        url = f"http://{CONFIG.host}:{CONFIG.port}"
+        print(f"""
+{C.GREEN}{C.BOLD}[OK] Gateway running{C.RESET} on {C.CYAN}{C.BOLD}{url}{C.RESET}
+
+  Provider : {CONFIG.provider_name}
+  Model    : {CONFIG.backend_model}
+  Endpoint : {build_chat_url(CONFIG.base_url)}
+
+Claude Code is configured! Run: {C.BOLD}claude{C.RESET} in your terminal.
+Press Ctrl+C to stop.
+{"-" * 60}""")
+
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            stop_server_thread()
+            print(f"{C.GREEN}Gateway stopped.{C.RESET}\n")
+        return
+
+    # 3. Interactive CLI mode if explicitly requested
+    if args.cli:
+        run_cli_interactive()
+        return
+
+    # 4. Default: Launch rich PySide6 GUI
+    run_gui()
 
 
 if __name__ == "__main__":
