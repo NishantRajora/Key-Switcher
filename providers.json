@@ -41,7 +41,6 @@
         "qwen/qwen3.8-27b"
       ]
     },
-    
     "NVIDIA": {
       "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
       "models": [
@@ -49,6 +48,7 @@
         "deepseek-ai/deepseek-v4-pro-0813",
         "openai/gpt-oss-20b"
       ]
+    
     }
   }
 }
