@@ -82,8 +82,10 @@ A typical project structure is:
 ```text
 Key Switcher/
 │
-├── Switcher_v3.py      # Main Claude Code key & model switcher
-├── api_tester.py       # GUI API Tester (verifies Base URL, Key & Model)
+├── Switcher_v3.py      # Main Claude Code key & model switcher (PySide6 GUI)
+├── api_tester.py       # GUI API Tester (White/Sapphire theme, verifies endpoints)
+├── ccgate.py           # Protocol-translating reverse proxy for Claude Code
+├── test_ccgate.py      # Automated unit tests for ccgate
 ├── providers.json      # Provider endpoints and models list
 └── README.md
 ```
@@ -156,6 +158,40 @@ Run the application:
 ```powershell
 python Switcher_v3.py
 ```
+
+---
+
+# Claude Code Gateway (ccgate.py)
+
+`ccgate.py` is a self-hosted protocol-translating reverse proxy that lets Claude Code talk to **ANY OpenAI-compatible provider** (OpenRouter, Groq, NVIDIA, Ollama, Hugging Face) using their standard API keys and models.
+
+```text
+Claude Code ────► localhost:5005 ────► ccgate ────► Groq / OpenRouter / NVIDIA
+                 (Anthropic API)     translates     (OpenAI API)
+```
+
+### Quick Start
+
+1. **Test upstream connectivity:**
+   ```powershell
+   python ccgate.py doctor
+   ```
+
+2. **Start gateway with automatic Claude Code setup:**
+   ```powershell
+   python ccgate.py --provider groq --model openai/gpt-oss-20b --setup
+   ```
+
+3. **Or launch interactively:**
+   ```powershell
+   python ccgate.py
+   ```
+   Select your provider, model, and API key from the numbered menu.
+
+4. **Run automated unit tests:**
+   ```powershell
+   python test_ccgate.py
+   ```
 
 ---
 
