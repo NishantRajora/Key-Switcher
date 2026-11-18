@@ -34,9 +34,9 @@
     "NVIDIA": {
       "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
       "models": [
-        "moonshotai/kimi-k3",
-        "deepseek-ai/deepseek-v4-pro-0813",
-        "openai/gpt-oss-20b"
+        "moonshotai/kimi-k3.1-pro",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
       ]
     
     }
