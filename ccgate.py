@@ -1481,29 +1481,38 @@ def run_gui():
 
     CONFIG.log_callback = log_bridge
 
-    # Theme stylesheet
+    # Professional White Theme Stylesheet with Sapphire Blue, Emerald Green & Ruby Red Accents
     STYLESHEET = """
         QMainWindow {
-            background-color: #0b0f19;
-            color: #f1f5f9;
+            background-color: #f8fafc;
+            color: #0f172a;
         }
         QWidget {
-            color: #f1f5f9;
+            color: #0f172a;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             font-size: 13px;
         }
         QFrame#card {
-            background-color: #151d2f;
-            border: 1px solid #23314d;
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 10px;
         }
         QLabel {
-            color: #94a3b8;
+            color: #334155;
             font-weight: 500;
         }
         QLabel#title {
-            color: #38bdf8;
+            color: #1e3a8a;
             font-size: 20px;
+            font-weight: 800;
+        }
+        QLabel#brand_badge {
+            background-color: #eff6ff;
+            color: #2563eb;
+            border: 1px solid #bfdbfe;
+            border-radius: 5px;
+            padding: 2px 7px;
+            font-size: 11px;
             font-weight: 700;
         }
         QLabel#subtitle {
@@ -1511,81 +1520,164 @@ def run_gui():
             font-size: 12px;
         }
         QLabel#status_running {
-            color: #10b981;
+            background-color: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+            border-radius: 13px;
+            padding: 4px 12px;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 12px;
         }
         QLabel#status_stopped {
-            color: #ef4444;
+            background-color: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+            border-radius: 13px;
+            padding: 4px 12px;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 12px;
+        }
+        QLabel#url_badge {
+            background-color: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            font-weight: 600;
         }
         QComboBox, QLineEdit, QSpinBox {
-            background-color: #0d1424;
-            border: 1px solid #28395a;
+            background-color: #ffffff;
+            border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 7px 12px;
-            color: #f8fafc;
+            color: #0f172a;
             selection-background-color: #2563eb;
+            selection-color: #ffffff;
         }
         QComboBox:focus, QLineEdit:focus, QSpinBox:focus {
-            border: 1px solid #38bdf8;
+            border: 1.5px solid #2563eb;
+            background-color: #ffffff;
         }
         QComboBox::drop-down {
-            border: none;
-            width: 24px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 28px;
+            border-left: 1px solid #e2e8f0;
+            border-top-right-radius: 6px;
+            border-bottom-right-radius: 6px;
+            background-color: #f8fafc;
         }
-        QComboBox QAbstractItemView {
-            background-color: #0d1424;
-            color: #f8fafc;
-            border: 1px solid #28395a;
-            selection-background-color: #1d4ed8;
+        QComboBox::down-arrow {
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #64748b;
+        }
+        QComboBox::down-arrow:hover {
+            border-top-color: #2563eb;
+        }
+        QComboBox QAbstractItemView, QListView {
+            background-color: #ffffff;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
             padding: 4px;
+            selection-background-color: #2563eb;
+            selection-color: #ffffff;
+            outline: none;
+        }
+        QComboBox QAbstractItemView::item, QListView::item {
+            min-height: 28px;
+            padding: 5px 10px;
+            border-radius: 4px;
+            color: #0f172a;
+        }
+        QComboBox QAbstractItemView::item:hover, QListView::item:hover {
+            background-color: #eff6ff;
+            color: #1e40af;
+        }
+        QComboBox QAbstractItemView::item:selected, QListView::item:selected {
+            background-color: #2563eb;
+            color: #ffffff;
         }
         QPushButton {
-            background-color: #1e293b;
-            border: 1px solid #334155;
+            background-color: #ffffff;
+            border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 8px 16px;
             font-weight: 600;
-            color: #f8fafc;
+            color: #334155;
         }
         QPushButton:hover {
-            background-color: #334155;
+            background-color: #f8fafc;
+            border-color: #94a3b8;
+            color: #0f172a;
         }
+        QPushButton:pressed {
+            background-color: #f1f5f9;
+        }
+        /* Green Start Button */
         QPushButton#btn_start {
             background-color: #059669;
-            border: 1px solid #10b981;
-            font-size: 14px;
-            padding: 10px 20px;
+            border: 1px solid #047857;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 9px 20px;
         }
         QPushButton#btn_start:hover {
             background-color: #10b981;
+            border-color: #059669;
         }
+        /* Red Stop Button */
         QPushButton#btn_stop {
             background-color: #dc2626;
-            border: 1px solid #ef4444;
-            font-size: 14px;
-            padding: 10px 20px;
+            border: 1px solid #b91c1c;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 9px 20px;
         }
         QPushButton#btn_stop:hover {
             background-color: #ef4444;
+            border-color: #dc2626;
         }
+        /* Blue Claude Setup Button */
         QPushButton#btn_apply {
             background-color: #2563eb;
-            border: 1px solid #3b82f6;
+            border: 1px solid #1d4ed8;
+            color: #ffffff;
+            font-weight: 700;
+            padding: 9px 18px;
         }
         QPushButton#btn_apply:hover {
-            background-color: #3b82f6;
+            background-color: #1d4ed8;
         }
+        /* Test Button with Indigo / Blue text */
+        QPushButton#btn_test {
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            color: #1e40af;
+            font-weight: 600;
+            padding: 9px 16px;
+        }
+        QPushButton#btn_test:hover {
+            background-color: #eff6ff;
+            border-color: #93c5fd;
+            color: #1d4ed8;
+        }
+        /* Log Area - Light Crisp Developer Console */
         QTextEdit {
-            background-color: #070b14;
-            border: 1px solid #1e293b;
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 8px;
             font-family: 'Consolas', 'Courier New', monospace;
             font-size: 12px;
-            color: #e2e8f0;
-            padding: 8px;
+            color: #0f172a;
+            padding: 10px;
         }
     """
 
@@ -1624,11 +1716,18 @@ def run_gui():
             h_layout.setContentsMargins(16, 12, 16, 12)
 
             title_box = QVBoxLayout()
-            title_lbl = QLabel(f"ccgate  v{VERSION}")
+            title_row = QHBoxLayout()
+            title_lbl = QLabel("ccgate")
             title_lbl.setObjectName("title")
+            badge_lbl = QLabel(f"v{VERSION}")
+            badge_lbl.setObjectName("brand_badge")
+            title_row.addWidget(title_lbl)
+            title_row.addWidget(badge_lbl)
+            title_row.addStretch()
+
             sub_lbl = QLabel("Self-hosted reverse proxy for Claude Code (Anthropic <-> OpenAI)")
             sub_lbl.setObjectName("subtitle")
-            title_box.addWidget(title_lbl)
+            title_box.addLayout(title_row)
             title_box.addWidget(sub_lbl)
             h_layout.addLayout(title_box)
 
@@ -1658,6 +1757,7 @@ def run_gui():
             c_layout.addWidget(QLabel("Backend Provider:"), 0, 0)
             self.prov_combo = QComboBox()
             self.prov_combo.setView(QListView())
+            self.prov_combo.setMaxVisibleItems(12)
             self.prov_combo.currentIndexChanged.connect(self.on_provider_changed)
             c_layout.addWidget(self.prov_combo, 0, 1)
 
@@ -1673,6 +1773,7 @@ def run_gui():
             self.model_combo = QComboBox()
             self.model_combo.setEditable(True)
             self.model_combo.setView(QListView())
+            self.model_combo.setMaxVisibleItems(12)
             c_layout.addWidget(self.model_combo, 1, 1, 1, 3)
 
             # API Key
@@ -1693,7 +1794,7 @@ def run_gui():
             # Base URL info
             c_layout.addWidget(QLabel("Endpoint URL:"), 3, 0)
             self.url_lbl = QLabel("")
-            self.url_lbl.setStyleSheet("color: #38bdf8; font-family: Consolas;")
+            self.url_lbl.setObjectName("url_badge")
             c_layout.addWidget(self.url_lbl, 3, 1, 1, 3)
 
             main_layout.addWidget(config_card)
@@ -1714,6 +1815,7 @@ def run_gui():
             act_layout.addWidget(self.btn_apply_claude)
 
             self.btn_test = QPushButton("🩺 Test Provider")
+            self.btn_test.setObjectName("btn_test")
             self.btn_test.clicked.connect(self.on_test_provider)
             act_layout.addWidget(self.btn_test)
 
@@ -1731,11 +1833,12 @@ def run_gui():
 
             log_header = QHBoxLayout()
             log_title = QLabel("Live Traffic Monitor")
-            log_title.setStyleSheet("font-weight: 700; color: #cbd5e1;")
+            log_title.setStyleSheet("font-weight: 700; color: #1e293b; font-size: 13px;")
             log_header.addWidget(log_title)
             log_header.addStretch()
 
-            self.copy_btn = QPushButton("Copy Gateway URL")
+            self.copy_btn = QPushButton("📋 Copy URL")
+            self.copy_btn.setStyleSheet("color: #2563eb; font-weight: 600; padding: 4px 10px;")
             self.copy_btn.clicked.connect(self.copy_url)
             log_header.addWidget(self.copy_btn)
 
@@ -1792,7 +1895,7 @@ def run_gui():
         def copy_url(self):
             url = f"http://{DEFAULT_HOST}:{self.port_spin.value()}"
             QApplication.clipboard().setText(url)
-            self.log_text.append(f"<span style='color:#38bdf8;'>[INFO] Copied {url} to clipboard</span>")
+            self.log_text.append(f"<span style='color:#2563eb; font-weight:600;'>[INFO] Copied {url} to clipboard</span>")
 
         def toggle_server(self):
             """Start or stop the gateway."""
@@ -1804,7 +1907,7 @@ def run_gui():
                 self.btn_toggle_server.setText("▶ Start Gateway")
                 self.btn_toggle_server.setObjectName("btn_start")
                 self.btn_toggle_server.setStyle(self.btn_toggle_server.style())
-                self.log_text.append(f"<span style='color:#f59e0b;'>[GATEWAY] {msg}</span>")
+                self.log_text.append(f"<span style='color:#d97706; font-weight:600;'>[GATEWAY] {msg}</span>")
             else:
                 prov_name = self.prov_combo.currentText().strip()
                 prov_info = self.providers.get(prov_name, {})
@@ -1830,11 +1933,11 @@ def run_gui():
                     self.btn_toggle_server.setText("■ Stop Gateway")
                     self.btn_toggle_server.setObjectName("btn_stop")
                     self.btn_toggle_server.setStyle(self.btn_toggle_server.style())
-                    self.log_text.append(f"<span style='color:#10b981; font-weight:bold;'>[GATEWAY] {msg}</span>")
-                    self.log_text.append(f"<span style='color:#94a3b8;'>  Model: {CONFIG.backend_model} | Provider: {CONFIG.provider_name}</span>")
+                    self.log_text.append(f"<span style='color:#059669; font-weight:bold;'>[GATEWAY] {msg}</span>")
+                    self.log_text.append(f"<span style='color:#475569;'>  Model: <b style='color:#0f172a;'>{CONFIG.backend_model}</b> | Provider: <b style='color:#0f172a;'>{CONFIG.provider_name}</b></span>")
                 else:
                     QMessageBox.critical(self, "Startup Error", msg)
-                    self.log_text.append(f"<span style='color:#ef4444;'>[ERROR] {msg}</span>")
+                    self.log_text.append(f"<span style='color:#dc2626; font-weight:bold;'>[ERROR] {msg}</span>")
 
         def on_apply_claude(self):
             """Configure ~/.claude/settings.json."""
@@ -1844,7 +1947,7 @@ def run_gui():
             if ok:
                 QMessageBox.information(self, "Claude Code Configured",
                                         f"{msg}\n\nYou can now run 'claude' in your terminal!")
-                self.log_text.append(f"<span style='color:#38bdf8;'>[CONFIG] {msg}</span>")
+                self.log_text.append(f"<span style='color:#2563eb; font-weight:bold;'>[CONFIG] {msg}</span>")
             else:
                 QMessageBox.critical(self, "Config Error", msg)
 
@@ -1860,7 +1963,7 @@ def run_gui():
                 QMessageBox.warning(self, "Missing Key", "Please enter an API key to test.")
                 return
 
-            self.log_text.append(f"<span style='color:#94a3b8;'>[TEST] Testing {prov_name} ({model})...</span>")
+            self.log_text.append(f"<span style='color:#64748b;'>[TEST] Testing {prov_name} ({model})...</span>")
             self.btn_test.setEnabled(False)
             QApplication.processEvents()
 
@@ -1868,18 +1971,19 @@ def run_gui():
             self.btn_test.setEnabled(True)
 
             if ok:
-                self.log_text.append(f"<span style='color:#10b981; font-weight:bold;'>[TEST OK] {prov_name} ({elapsed:.0f}ms): \"{msg}\"</span>")
+                self.log_text.append(f"<span style='color:#059669; font-weight:bold;'>[TEST OK] {prov_name} ({elapsed:.0f}ms): \"{msg}\"</span>")
             else:
-                self.log_text.append(f"<span style='color:#ef4444; font-weight:bold;'>[TEST FAIL] {prov_name} ({elapsed:.0f}ms): {msg}</span>")
+                self.log_text.append(f"<span style='color:#dc2626; font-weight:bold;'>[TEST FAIL] {prov_name} ({elapsed:.0f}ms): {msg}</span>")
 
         def append_log(self, ts, method, path, model, status, elapsed, in_tok, out_tok):
-            color = "#10b981" if 200 <= status < 300 else "#ef4444"
+            status_color = "#059669" if 200 <= status < 300 else "#dc2626"
+            method_color = "#2563eb"
             line = (
-                f"<span style='color:#64748b;'>{ts}</span> "
-                f"<span style='color:#38bdf8;'>{method}</span> "
-                f"<span>{path}</span> "
-                f"<span style='color:#a855f7;'>-> {model}</span> "
-                f"<span style='color:{color}; font-weight:bold;'>[{status}]</span> "
+                f"<span style='color:#64748b; font-weight:600;'>{ts}</span> "
+                f"<span style='color:{method_color}; font-weight:700;'>{method}</span> "
+                f"<span style='color:#0f172a;'>{path}</span> "
+                f"<span style='color:#7c3aed; font-weight:600;'>-> {model}</span> "
+                f"<span style='color:{status_color}; font-weight:bold;'>[{status}]</span> "
                 f"<span style='color:#64748b;'>({elapsed:.0f}ms, {in_tok}in/{out_tok}out)</span>"
             )
             self.log_text.append(line)
